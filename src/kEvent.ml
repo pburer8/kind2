@@ -225,8 +225,9 @@ let get_module () = !this_module
 
 (* Setup of the messaging: context and sockets of the invariant
    manager, ports to connect to for the workers *)
-type messaging_setup = 
-  (EventMessaging.ctx * EventMessaging.pub_socket * EventMessaging.pull_socket) * (string * string)
+type messaging_setup = EventMessaging.im_socket
+let path_of_setup setup = EventMessaging.path_of_im setup
+let setup_of_path path = EventMessaging.im_socket_of_path path
 
 type mthread = EventMessaging.thread
 
@@ -234,26 +235,26 @@ type mthread = EventMessaging.thread
 let setup () = 
 
   (* Create context for invariant manager *)
-  let im_context, (b, m) = EventMessaging.init_im () in
+  let im = EventMessaging.init_im () in
 
   (* Return contexts *)
-  (im_context, (b, m))
+  im
 
 
 (* Start messaging for a process *)
-let run_process proc (_, (bcast_port, push_port)) on_exit = 
+let run_process proc im on_exit = 
 
   (* Initialize messaging for process *)
-  let ctx = EventMessaging.init_worker proc bcast_port push_port in
+  let worker = EventMessaging.init_worker proc im in
 
   (* Run messaging for process *)
-  EventMessaging.run_worker ctx proc on_exit
+  EventMessaging.run_worker worker proc on_exit
 
 
 (* Start messaging for invariant manager *)
 let run_im : messaging_setup -> (int * Lib.kind_module) list -> (exn -> unit) -> unit
 =
-  fun (ctx, _) pids on_exit -> EventMessaging.run_im ctx pids on_exit
+  fun im pids on_exit -> EventMessaging.run_im im pids on_exit
 
 
 (* ********************************************************************** *)
@@ -2247,8 +2248,8 @@ let update_child_processes_list new_process_list =
   with Messaging.NotInitialized -> ()
 
 let purge_im : messaging_setup -> unit =
-  fun (ctx, _) ->
-  try EventMessaging.purge_im_mailbox ctx
+  fun im ->
+  try EventMessaging.purge_im_mailbox im
   with Messaging.NotInitialized -> ()
 
 (* Terminates if a termination message was received. Does NOT modified
