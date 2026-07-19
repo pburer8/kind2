@@ -21,20 +21,19 @@ More advanced features include contract-based compositional verification, proof 
  (documentation "https://kind.cs.uiowa.edu/kind2_user_doc")
  (depends
   (ocaml
-   (>= 4.14))
+   (>= 5.1.0))
   dune
   dune-build-info
   (menhir
-   (>= 20181026)) ; moxiParser.mly uses "token aliases", which were added in menhir 20181026
+   (>= 20180523)) ; Required by dune when the infer option is used
+                  ; See issue: https://github.com/ocaml/dune/issues/1392
   num
-  (odoc
-   (and
-    :with-doc
-    (>= 3.0))) ; developer docs post-processing assumes odoc 3's odoc.support/ layout
+  (odoc :with-doc)
   (ounit2 :with-test)
   yojson
-  (zmq
-   (>= 5.1.0))
+  eio
+  eio_main
+  cstruct
  )
 )
 
@@ -45,20 +44,16 @@ More advanced features include contract-based compositional verification, proof 
  (homepage "https://kind2-mc.github.io/kind2")
  (depends
   (ocaml
-   (>= 4.14))
+   (>= 5.1.0))
   dune
   dune-build-info
   (menhir
-   (>= 20181026)) ; moxiParser.mly uses "token aliases", which were added in menhir 20181026
+   (>= 20180523)) ; Required by dune when the infer option is used
+                  ; See issue: https://github.com/ocaml/dune/issues/1392
   num
-  (odoc
-   (and
-    :with-doc
-    (>= 3.0))) ; developer docs post-processing assumes odoc 3's odoc.support/ layout
+  (odoc :with-doc)
   (ounit2 :with-test)
   yojson
-  (zmq
-   (>= 5.1.0))
  )
 )
 
