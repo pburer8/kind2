@@ -1,6 +1,9 @@
 <!-- DO NOT EDIT, edit content/README.md instead -->
 # Kind 2 User Documentation — Hugo + Hextra
 
+This is the Kind 2 user documentation, migrated from Sphinx (reStructuredText)
+to [Hugo](https://gohugo.io) using the [Hextra](https://github.com/imfing/hextra) theme.
+
 ## Structure
 
 ```
@@ -34,21 +37,33 @@ languages (` ```bash `, ` ```text `, ` ```json `).
 
 ## Running locally
 
-Requires **Hugo Extended v0.146.0+**.
+- **Hugo Extended v0.146.0+**
+- **Git** (to fetch the Hextra theme, vendored as a submodule — see below)
+- **curl or wget** (to fetch KaTeX/FlexSearch assets — see below; both are
+  preinstalled on virtually every system already)
+- **Python 3** (for PDF export only — `make` sets up a venv automatically)
+
+## Getting the theme
+
+The Hextra theme is **not committed to this repo** — it's a git submodule
+pinned to [`v0.12.3`](https://github.com/imfing/hextra/releases), so
+contributors always build against a known-good, reviewable version rather
+than each pulling whatever the theme's `main` branch currently has.
+
+Clone with the submodule in one step:
 
 ```bash
-hugo server -D
+git clone --recurse-submodules <this-repo-url>
 ```
 
-Then open http://localhost:1313/.
-
-To build the static site:
+Or, if you already have a plain clone:
 
 ```bash
 make html
 ```
 
-Output goes to `public/`.
+You don't need to remember either of these yourself day-to-day — `make html`
+/ `make doc` fetch the submodule automatically if it's missing.
 
 > **Note:** `make html` or `make vendor-assets` fetches FlexSearch (search) and KaTeX (math
 > rendering) using `fetch-vendor-assets.sh` the first time it runs, so it needs

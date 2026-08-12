@@ -4,6 +4,7 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 all: doc
+<<<<<<< HEAD
 doc: html pdf update
 <<<<<<< HEAD
 =======
@@ -15,6 +16,9 @@ doc: html pdf
 >>>>>>> 2810cf4e (Partial Makefile update)
 =======
 >>>>>>> 40c9b7b5 (Added README generation and changed the site to be clearer)
+=======
+doc: html pdf
+>>>>>>> b7017aa2 (Remove vendor code for build-at-runtime)
 
 # Hextra is a git submodule (see .gitmodules), not vendored in this repo — this
 # pulls it in automatically the first time you build after `git clone`.
@@ -33,6 +37,7 @@ themes/hextra/layouts:
 		exit 1; \
 	fi
 
+<<<<<<< HEAD
 update:
 	@printf "Updating root README.md and LICENSE.md...\n"
 	{ \
@@ -46,6 +51,8 @@ update:
 	@printf '<!-- DO NOT EDIT, edit content/README.md instead -->\n' > README.md
 	cat content/README.md >> README.md
 
+=======
+>>>>>>> b7017aa2 (Remove vendor code for build-at-runtime)
 # KaTeX (math) and FlexSearch (search) are fetched via npm into assets/vendor/
 # on demand, not committed — see fetch-vendor-assets.sh. This avoids relying
 # on cdn.jsdelivr.net at Hugo build time without checking binary assets into git.
@@ -57,6 +64,7 @@ assets/vendor/katex/dist/katex.min.css assets/vendor/flexsearch/dist/flexsearch.
 html: theme vendor-assets
 	hugo --minify
 
+<<<<<<< HEAD
 VENV := pdf-tools/venv
 
 venv: $(VENV)/bin/activate
@@ -118,10 +126,20 @@ update:
 >>>>>>> 40c9b7b5 (Added README generation and changed the site to be clearer)
 serve:
 >>>>>>> ffaa8272 (Remove some files)
+=======
+pdf: html
+	SKIP_HUGO_BUILD=1 PYTHON=$(VENV)/bin/python3 ./pdf-tools/build_pdf.sh
+
+serve: theme vendor-assets
+>>>>>>> b7017aa2 (Remove vendor code for build-at-runtime)
 	hugo server -D
 
 clean:
 	rm -rf public resources/_gen print/all-docs.html print/*.pdf
 
 distclean: clean
+<<<<<<< HEAD
 	rm -rf $(VENV) assets/vendor assets/css/fonts/
+=======
+	rm -rf $(VENV) assets/vendor
+>>>>>>> b7017aa2 (Remove vendor code for build-at-runtime)
