@@ -5,6 +5,7 @@
 <<<<<<< HEAD
 all: doc
 doc: html pdf update
+<<<<<<< HEAD
 =======
 all: doc update
 =======
@@ -12,6 +13,8 @@ all: doc
 >>>>>>> ffaa8272 (Remove some files)
 doc: html pdf
 >>>>>>> 2810cf4e (Partial Makefile update)
+=======
+>>>>>>> 40c9b7b5 (Added README generation and changed the site to be clearer)
 
 # Hextra is a git submodule (see .gitmodules), not vendored in this repo — this
 # pulls it in automatically the first time you build after `git clone`.
@@ -89,8 +92,30 @@ pdf: html venv
 endif
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 serve: theme vendor-assets
 =======
+=======
+update:
+	echo '<!-- DO NOT EDIT, see doc/usr/README.rst for details -->\n' > ../README.md
+	cat content/header.md >> ../README.md
+	cat content/home.md >> ../README.md
+	# Replace internal references with explicit ones to render README on Github
+	sed -E -i 's/:ref:`(.*)<(.*)>`/`\1<${doc_root}\2\.html>`_/g' ../README.md
+	# Replace include directives with the file contents, as the
+	# directives are not currently supported/rendered on Github.
+	# The source/ directory is where files included in
+	# this manner are expected to reside.
+	#     https://unix.stackexchange.com/a/128797/248178
+	sed -i '/\.\. include:: \(.*\)/{s//source\/\1/;s/'\''/&\\&&/g;s/.*/cat<'"'&'/e}" ../README.md
+	# Generate the documentation README
+	echo '<!-- DO NOT EDIT, edit content/README.md instead -->\n' > README.md
+	cat content/README.md >> README.md
+	sed -i '/\.\. include:: \(.*\)/{s//source\/\1/;s/'\''/&\\&&/g;s/.*/cat<'"'&'/e}" README.md
+
+	cp content/docs/license.md ../../LICENSE.md
+
+>>>>>>> 40c9b7b5 (Added README generation and changed the site to be clearer)
 serve:
 >>>>>>> ffaa8272 (Remove some files)
 	hugo server -D
