@@ -346,8 +346,9 @@ For PDF documentation, you additionally need:
 If you're on Debian/Ubuntu, assuming you have Python 3 installed,
 you can run the following:
 
-.. code-block:: bash
+``` 
     snap install hugo
     pip3 install beautifulsoup4 lxml weasyprint
+```
 
 See ``doc/README.md`` for more information. 
