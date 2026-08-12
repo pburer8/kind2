@@ -5,6 +5,7 @@
 <<<<<<< HEAD
 all: doc
 <<<<<<< HEAD
+<<<<<<< HEAD
 doc: html pdf update
 <<<<<<< HEAD
 =======
@@ -19,6 +20,9 @@ doc: html pdf
 =======
 doc: html pdf
 >>>>>>> b7017aa2 (Remove vendor code for build-at-runtime)
+=======
+doc: html pdf update
+>>>>>>> b48c1094 (Updated READMEs and Makefile)
 
 # Hextra is a git submodule (see .gitmodules), not vendored in this repo — this
 # pulls it in automatically the first time you build after `git clone`.
@@ -38,6 +42,7 @@ themes/hextra/layouts:
 	fi
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 update:
 	@printf "Updating root README.md and LICENSE.md...\n"
 	{ \
@@ -53,6 +58,27 @@ update:
 
 =======
 >>>>>>> b7017aa2 (Remove vendor code for build-at-runtime)
+=======
+update:
+	# Generate the project README with CI links for Github
+	echo '<!-- DO NOT EDIT, see doc/README.md for details -->\n' > ../README.md
+	cat content/header.md >> ../README.md
+	cat content/home.md >> ../README.md
+	# Replace internal references with explicit ones to render README on Github
+	sed -E -i 's/:ref:`(.*)<(.*)>`/`\1<${doc_root}\2\.html>`_/g' ../README.md
+	# Replace include directives with the file contents, as the
+	# directives are not currently supported/rendered on Github.
+	# The source/ directory is where files included in
+	# this manner are expected to reside.
+	#     https://unix.stackexchange.com/a/128797/248178
+	sed -i '/\.\. include:: \(.*\)/{s//source\/\1/;s/'\''/&\\&&/g;s/.*/cat<'"'&'/e}" ../README.md
+	# Generate the documentation README
+	echo '<!-- DO NOT EDIT, edit content/README.md instead -->\n' > README.md
+	cat content/README.md >> README.md
+	sed -i '/\.\. include:: \(.*\)/{s//source\/\1/;s/'\''/&\\&&/g;s/.*/cat<'"'&'/e}" README.md
+	cp content/docs/license.md ../LICENSE.md
+
+>>>>>>> b48c1094 (Updated READMEs and Makefile)
 # KaTeX (math) and FlexSearch (search) are fetched via npm into assets/vendor/
 # on demand, not committed — see fetch-vendor-assets.sh. This avoids relying
 # on cdn.jsdelivr.net at Hugo build time without checking binary assets into git.
