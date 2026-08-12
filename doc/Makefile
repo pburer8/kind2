@@ -2,10 +2,14 @@
 
 # `make doc` builds both output formats, matching the old Sphinx `make all` (html + pdf).
 <<<<<<< HEAD
+<<<<<<< HEAD
 all: doc
 doc: html pdf update
 =======
 all: doc update
+=======
+all: doc
+>>>>>>> ffaa8272 (Remove some files)
 doc: html pdf
 >>>>>>> 2810cf4e (Partial Makefile update)
 
@@ -84,7 +88,11 @@ pdf: html venv
 	SKIP_HUGO_BUILD=1 PYTHON=$(VENV)/bin/python3 ./pdf-tools/build_pdf.sh
 endif
 
+<<<<<<< HEAD
 serve: theme vendor-assets
+=======
+serve:
+>>>>>>> ffaa8272 (Remove some files)
 	hugo server -D
 
 clean:
