@@ -1,8 +1,13 @@
 .PHONY: all doc html pdf clean distclean serve theme vendor-assets update
 
 # `make doc` builds both output formats, matching the old Sphinx `make all` (html + pdf).
+<<<<<<< HEAD
 all: doc
 doc: html pdf update
+=======
+all: doc update
+doc: html pdf
+>>>>>>> 2810cf4e (Partial Makefile update)
 
 # Hextra is a git submodule (see .gitmodules), not vendored in this repo — this
 # pulls it in automatically the first time you build after `git clone`.
