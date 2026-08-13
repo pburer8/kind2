@@ -24,6 +24,8 @@ doc: html pdf
 doc: html pdf update
 >>>>>>> b48c1094 (Updated READMEs and Makefile)
 
+# Hextra is a git submodule (see .gitmodules), not vendored in this repo — this
+# pulls it in automatically the first time you build after `git clone`.
 theme: themes/hextra/layouts
 
 themes/hextra/layouts:
@@ -94,6 +96,8 @@ VENV := pdf-tools/venv
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+VENV := pdf-tools/venv
+
 VENV := pdf-tools/venv
 
 venv: $(VENV)/bin/activate
