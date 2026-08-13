@@ -24,22 +24,11 @@ doc: html pdf
 doc: html pdf update
 >>>>>>> b48c1094 (Updated READMEs and Makefile)
 
-# Hextra is a git submodule (see .gitmodules), not vendored in this repo — this
-# pulls it in automatically the first time you build after `git clone`.
 theme: themes/hextra/layouts
 
 themes/hextra/layouts:
-	@if git rev-parse --git-dir > /dev/null 2>&1; then \
-		echo "==> fetching theme (git submodule)"; \
-		git submodule update --init --recursive; \
-	else \
-		echo "themes/hextra is missing and this isn't a git checkout, so it can't be"; \
-		echo "fetched automatically. Either:"; \
-		echo "  git clone --recurse-submodules <this-repo-url>"; \
-		echo "or, if you already have a plain clone:"; \
-		echo "  git submodule update --init --recursive"; \
-		exit 1; \
-	fi
+	git init
+	git submodule add https://github.com/imfing/hextra themes/hextra
 
 <<<<<<< HEAD
 <<<<<<< HEAD
