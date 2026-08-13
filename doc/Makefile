@@ -98,6 +98,9 @@ VENV := pdf-tools/venv
 <<<<<<< HEAD
 VENV := pdf-tools/venv
 
+portable: theme vendor-assets
+	HUGO_RELATIVEURLS=true hugo --minify -b "" -d public-portable
+
 VENV := pdf-tools/venv
 
 venv: $(VENV)/bin/activate
