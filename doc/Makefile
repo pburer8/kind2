@@ -89,7 +89,12 @@ assets/vendor/katex/dist/katex.min.css assets/vendor/flexsearch/dist/flexsearch.
 
 html: theme vendor-assets
 	hugo --minify
+	
+# Debian/Ubuntu (PEP 668) block system-wide `pip install`, so PDF tooling gets
+# its own venv, created on first use. Run `make distclean` to force a rebuild.
+VENV := pdf-tools/venv
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 VENV := pdf-tools/venv
 
@@ -110,10 +115,17 @@ $(VENV)/bin/activate: pdf-tools/requirements.txt
 		echo; \
 		exit 1; \
 	fi
+=======
+venv: $(VENV)/bin/activate
+
+$(VENV)/bin/activate: pdf-tools/requirements.txt
+	python3 -m venv $(VENV)
+>>>>>>> b5b526c6 (Added virtual environment)
 	$(VENV)/bin/pip install --quiet --upgrade pip
 	$(VENV)/bin/pip install --quiet -r pdf-tools/requirements.txt
 	touch $(VENV)/bin/activate
 
+<<<<<<< HEAD
 # If PYTHON is set explicitly (env var or `make PYTHON=... pdf`), use it
 # directly and skip venv creation altogether — this is the manual-install
 # escape hatch referenced in the error message above.
@@ -154,6 +166,9 @@ serve:
 >>>>>>> ffaa8272 (Remove some files)
 =======
 pdf: html
+=======
+pdf: html venv
+>>>>>>> b5b526c6 (Added virtual environment)
 	SKIP_HUGO_BUILD=1 PYTHON=$(VENV)/bin/python3 ./pdf-tools/build_pdf.sh
 
 serve: theme vendor-assets
