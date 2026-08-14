@@ -50,7 +50,7 @@ To build the static site:
 make html
 ```
 
-Output goes to `public-portable/`.
+Output goes to `public/`.
 
 > **Note:** `make html` or `make vendor-assets` fetches FlexSearch (search) and KaTeX (math
 > rendering) using `fetch-vendor-assets.sh` the first time it runs, so it needs
