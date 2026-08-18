@@ -278,6 +278,7 @@ def build_merged_html():
     table { border-collapse: collapse; width: 100%%; margin: 1rem 0; }
     th, td { border: 1px solid #ccc; padding: .4rem .6rem; text-align: left; }
     img { max-width: 100%%; height: auto; }
+    svg { display: none; }
     section.doc-page { page-break-before: always; }
     a { color: #0969da; text-decoration: none; }
     blockquote { border-left: 4px solid #ccc; margin: 1rem 0; padding: .2rem 1rem; color: #555; background: #fafafa; }
