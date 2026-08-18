@@ -75,7 +75,7 @@ params:
   math:
     enable: true
     katex:
-      base: /vendor/katex/dist
+      base: /css
       css: vendor/katex/dist/katex.min.css
       assets:
         - css/fonts/KaTeX_AMS-Regular.woff2
