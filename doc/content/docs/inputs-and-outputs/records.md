@@ -15,7 +15,7 @@ A record value is constructed by giving a value to each field, using the type
 name followed by the field assignments (note that fields are assigned with
 `=`):
 
-```text
+```lustre
 r = rat { n = 1.0; d = 2.0 };
 ```
 
