@@ -934,7 +934,7 @@ module RunCacheInvs : PostAnalysis = struct
 
             List.iter
               (fun inv ->
-                Format.fprintf fmt "%a@." Term.pp_print_term inv
+                Format.fprintf fmt "%a@." NativeInput.pp_print_term inv
               )
             invs_min ;
             close_out oc;

@@ -44,6 +44,8 @@ val dump_native : TransSys.t -> unit
 
 val term_of_sexpr : HStringSExpr.t -> Term.t
 
+val pp_print_term : Format.formatter -> Term.t -> unit
+
 
 (* 
    Local Variables:
