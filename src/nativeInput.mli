@@ -42,6 +42,8 @@ val dump_native_to : TransSys.t -> string -> unit
 (** Dump a transition system to a file in native format *)
 val dump_native : TransSys.t -> unit
 
+val term_of_sexpr : HStringSExpr.t -> Term.t
+
 
 (* 
    Local Variables:

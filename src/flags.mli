@@ -173,6 +173,11 @@ val log_invs : unit -> bool
 (** Prints invariants **)
 val print_invs : unit -> bool
 
+(** Caches invariants **)
+val cache_invs : unit -> string option
+
+val read_invs : unit -> string option
+
 (** Print counterexamples **)
 val print_cex : unit -> bool
 
@@ -257,7 +262,6 @@ val color : unit -> bool
 
 (** True iff the current solver support sbv_to_int and ubv_to_int operators *)
 val support_new_bv_cast_operators : unit -> bool
-
 
 
 (** {2 SMT solver flags} *)

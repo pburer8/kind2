@@ -3176,6 +3176,30 @@ module Global = struct
         print_invs_default
     )
   let print_invs () = ! print_invs
+
+  let cache_invs_default = None
+  let cache_invs = ref cache_invs_default
+  let _ = add_spec 
+    "--cache_invariants"
+    ((Arg.String (fun str -> cache_invs := Some str)))
+    (fun fmt ->
+      Format.fprintf fmt "\
+        Cache invariants in a file for later reuse \
+        Default: None")
+
+  let cache_invs () = !cache_invs
+
+  let read_invs_default = None
+  let read_invs = ref read_invs_default
+  let _ = add_spec
+      "--read_invariants"
+      ((Arg.String (fun str -> read_invs := Some str)))
+      (fun fmt ->
+        Format.fprintf fmt "\
+        Read invariants from a file to sidestep recalculation \
+        Default: None")
+
+  let read_invs () = !read_invs
   
   let print_cex_default = true
   let print_cex = ref print_cex_default
@@ -3764,6 +3788,7 @@ let check_nonvacuity_default = true
     (fun fmt -> Format.fprintf fmt "What follows on the command line is \
                                     a file name.")
 
+  
 end
 
 (* Re-exports. *)
@@ -3785,6 +3810,8 @@ let include_dirs = Global.include_dirs
 let arr_elements_printed = Global.arr_elements_printed
 let log_invs = Global.log_invs
 let print_invs = Global.print_invs
+let cache_invs = Global.cache_invs
+let read_invs = Global.read_invs
 let print_cex = Global.print_cex
 let print_witness = Global.print_witness
 let dump_cex = Global.dump_cex

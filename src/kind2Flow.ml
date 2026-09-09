@@ -748,6 +748,26 @@ let process_ic3_modules (modules: Lib.kind_module list) : Lib.kind_module list =
   else
     modules
 
+(* in kind2Flow.ml, near the top-level helpers, before `analyze` / the loop *)
+
+let load_cached_invariants sys cache_file =
+  let ic = open_in cache_file in
+  let lexbuf = Lexing.from_channel ic in
+  let sexps = SExprParser.sexps SExprLexer.main lexbuf in
+  close_in ic ;
+  sexps
+  |> List.fold_left (fun acc sexp ->
+    let invar = NativeInput.term_of_sexpr sexp in
+    let cert = (-1, invar) in (* dummy certificate, no proof recorded *)
+    let two_state =
+      match Term.var_offsets_of_term invar with
+      | Some lo, Some up -> not (Numeral.equal lo up)
+      | _ -> false
+    in
+    TSys.add_invariant acc invar cert two_state |> ignore ;
+    acc
+  ) sys
+
 (** Performs an analysis. *)
 let analyze msg_setup save_results ignore_props stop_if_falsified slice_to_prop modules in_sys param sys =
   Stat.start_timer Stat.analysis_time ;
@@ -1116,6 +1136,12 @@ let run in_sys =
         (* Build trans sys and slicing info. *)
         let sys, _ (* in_sys_sliced *) =
           ISys.trans_sys_of_analysis in_sys param
+        in
+
+        let sys =
+          match Flags.read_invs () with
+            | None -> sys
+            | Some cache_file -> load_cached_invariants sys cache_file
         in
 
         (* Format.printf "%a" (TSys.pp_print_subsystems true) sys; *)

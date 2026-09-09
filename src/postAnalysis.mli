@@ -55,6 +55,7 @@ module RunCertif: PostAnalysis
 module RunSliceCertif: PostAnalysis
 module RunIVC: PostAnalysis
 module RunMCS: PostAnalysis
+module RunCacheInvs: PostAnalysis
 
  val run_mcs_post_analysis:
     (* Input system. *)

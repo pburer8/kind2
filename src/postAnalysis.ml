@@ -908,6 +908,52 @@ module RunMCS: PostAnalysis = struct
     )
 end
 
+module RunCacheInvs : PostAnalysis = struct
+  let name = "cacheinvs"
+  let title = "cache invariants"
+  let is_active () = match Flags.cache_invs () with
+    | None -> false 
+    | Some _ -> true
+
+  let run in_sys param _ results =
+    let top = (Analysis.info_of_param param).Analysis.top in
+
+    last_result in_sys results top
+    |> Res.chain (fun { Analysis.sys } -> 
+
+      try (
+        let k_min, invs_min =
+          CertifChecker.minimize_invariants sys None None
+        in
+        match Flags.cache_invs () with 
+          | None -> Ok ()
+          | Some cache_file ->
+            let oc = open_out cache_file in
+            let fmt = Format.formatter_of_out_channel oc in
+            Format.pp_set_margin fmt 1_000_000 ;   (* disable line wrapping *)
+
+            List.iter
+              (fun inv ->
+                Format.fprintf fmt "%a@." Term.pp_print_term inv
+              )
+            invs_min ;
+            close_out oc;
+            
+            Ok ()
+      ) with
+      | CertifChecker.CouldNotProve err -> error(
+        fun fmt ->
+          Format.fprintf fmt
+            "Could not minimize invariants:@ %a" (fun fmt () -> err fmt) ()
+      )
+      | e -> error (
+        fun fmt -> Format.fprintf fmt
+          "Could not minimize invariants:@ %s"
+          (Printexc.to_string e)
+      )
+    )
+end
+
 (** List of post-analysis modules. *)
 let post_analysis = [
   (module RunInvPrint: PostAnalysis) ;
@@ -918,6 +964,7 @@ let post_analysis = [
   (module RunTestGen: PostAnalysis) ;
   (module RunAssumptionGen: PostAnalysis) ;
   (module RunMCS: PostAnalysis) ;
+  (module RunCacheInvs: PostAnalysis) ;
 ]
 
 (** Runs the post-analysis things on a system and its results.
