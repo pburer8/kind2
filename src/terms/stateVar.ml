@@ -454,7 +454,19 @@ let state_var_of_string (state_var_name, state_var_scope) =
    concatenation of all scopes and the state variable. Raises {Not_found} if it
    was not previously declared. *)
 let state_var_of_long_string s =
-  state_var_of_string (Lib.extract_scope_name s)
+  let rec try_split name scope_rev =
+    match state_var_of_string (name, List.rev scope_rev) with
+      | sv -> sv
+      | exception Not_found -> (
+        match scope_rev with
+        | [] -> raise Not_found
+        | innermost :: scope_rev -> try_split (innermost ^ "." ^ name) scope_rev
+      )
+  in
+  let name, scope = Lib.extract_scope_name s in
+
+  try_split name (List.rev scope)
+  
     
 
 (* ********************************************************************* *)
