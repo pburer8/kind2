@@ -174,9 +174,9 @@ val log_invs : unit -> bool
 val print_invs : unit -> bool
 
 (** Caches invariants **)
-val cache_invs : unit -> string option
+val cache_invs : unit -> bool
 
-val read_invs : unit -> string option
+val read_invs : unit -> bool
 
 (** Print counterexamples **)
 val print_cex : unit -> bool

@@ -1140,8 +1140,14 @@ let run in_sys =
 
         let sys =
           match Flags.read_invs () with
-            | None -> sys
-            | Some cache_file -> load_cached_invariants sys cache_file
+            | false -> sys
+            | true -> 
+
+              let in_file = Flags.input_file () in
+              let file = List.hd (List.rev (String.split_on_char '/' in_file)) in
+              let name = List.hd (String.split_on_char '.' file) in
+
+              load_cached_invariants sys (name ^ ".txt")
         in
 
         (* Format.printf "%a" (TSys.pp_print_subsystems true) sys; *)

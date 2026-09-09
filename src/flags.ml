@@ -3177,27 +3177,27 @@ module Global = struct
     )
   let print_invs () = ! print_invs
 
-  let cache_invs_default = None
+  let cache_invs_default = false
   let cache_invs = ref cache_invs_default
   let _ = add_spec 
     "--cache_invariants"
-    ((Arg.String (fun str -> cache_invs := Some str)))
+    (bool_arg cache_invs)
     (fun fmt ->
       Format.fprintf fmt "\
-        Cache invariants in a file for later reuse \
-        Default: None")
+        Cache invariants in a file (name_of_lustre.log) for later reuse \
+        Default: false")
 
   let cache_invs () = !cache_invs
 
-  let read_invs_default = None
+  let read_invs_default = false
   let read_invs = ref read_invs_default
   let _ = add_spec
       "--read_invariants"
-      ((Arg.String (fun str -> read_invs := Some str)))
+      (bool_arg read_invs)
       (fun fmt ->
         Format.fprintf fmt "\
-        Read invariants from a file to sidestep recalculation \
-        Default: None")
+        Read invariants from a file (name_of_lustre.log) to sidestep recalculation \
+        Default: false")
 
   let read_invs () = !read_invs
   

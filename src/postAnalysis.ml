@@ -911,9 +911,7 @@ end
 module RunCacheInvs : PostAnalysis = struct
   let name = "cacheinvs"
   let title = "cache invariants"
-  let is_active () = match Flags.cache_invs () with
-    | None -> false 
-    | Some _ -> true
+  let is_active () = Flags.cache_invs ()
 
   let run in_sys param _ results =
     let top = (Analysis.info_of_param param).Analysis.top in
@@ -922,13 +920,17 @@ module RunCacheInvs : PostAnalysis = struct
     |> Res.chain (fun { Analysis.sys } -> 
 
       try (
-        let k_min, invs_min =
+        let _, invs_min =
           CertifChecker.minimize_invariants sys None None
         in
         match Flags.cache_invs () with 
-          | None -> Ok ()
-          | Some cache_file ->
-            let oc = open_out cache_file in
+          | false -> Ok ()
+          | true ->
+            let in_file = Flags.input_file () in
+            let file = List.hd (List.rev (String.split_on_char '/' in_file)) in
+            let name = List.hd (String.split_on_char '.' file) in
+
+            let oc = open_out (name ^ ".txt") in
             let fmt = Format.formatter_of_out_channel oc in
             Format.pp_set_margin fmt 1_000_000 ;   (* disable line wrapping *)
 
