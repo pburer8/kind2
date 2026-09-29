@@ -956,7 +956,9 @@ let load_cached_invariants sys cache_file =
 
 (** Performs an analysis. *)
 (* The parameter and system the engines of the analysis under way ran on
-   last, when a recursive function was unrolled further (see [analyze]) *)
+   last, when a recursive function was unrolled further (see [analyze]),
+   and the properties the recursive functions as they are falsify (see
+   [RecUnrolling.check_abstractions]) *)
 let latest_param_and_sys = ref None
 
 let analyze msg_setup save_results ignore_props stop_if_falsified slice_to_prop modules in_sys param sys =
@@ -1060,21 +1062,22 @@ let analyze msg_setup save_results ignore_props stop_if_falsified slice_to_prop 
       in
 
       let param, sys = run_engines param sys in
+      let genuine = RecUnrolling.genuine_properties () in
       (* The solver of the last round, if any, is not needed anymore *)
       RecUnrolling.reset () ;
-      latest_param_and_sys := Some (param, sys)
+      latest_param_and_sys := Some (param, sys, genuine)
   ) ;
 
-  let param, sys =
+  let param, sys, genuine =
     match !latest_param_and_sys with
-    | Some (param, sys) -> param, sys
-    | None -> param, sys
+    | Some (param, sys, genuine) -> param, sys, genuine
+    | None -> param, sys, []
   in
   latest_param_and_sys := None ;
 
   let result =
     Stat.get_float Stat.analysis_time
-    |> Anal.mk_result param sys
+    |> Anal.mk_result ~genuine param sys
   in
 
   if not ignore_props && save_results then (
