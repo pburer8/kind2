@@ -1147,7 +1147,10 @@ let run in_sys =
               let file = List.hd (List.rev (String.split_on_char '/' in_file)) in
               let name = List.hd (String.split_on_char '.' file) in
 
-              load_cached_invariants sys (name ^ ".txt")
+              try
+                load_cached_invariants sys (name ^ ".txt")
+              with
+              | e -> sys
         in
 
         (* Format.printf "%a" (TSys.pp_print_subsystems true) sys; *)
