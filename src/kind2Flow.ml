@@ -750,6 +750,26 @@ let process_ic3_modules (modules: Lib.kind_module list) : Lib.kind_module list =
 
 (* in kind2Flow.ml, near the top-level helpers, before `analyze` / the loop *)
 
+let add_as_candidate os_invs sys =
+  let _cnt = ref 0 in
+  let cnt () =
+    _cnt := !_cnt + 1 ;
+    !_cnt
+  in
+  let create_candidate t =
+    Property.{
+      prop_name = Format.sprintf "%%inv_%i" (cnt ()) ;
+      prop_source = Property.Candidate None ;
+      prop_term = t ;
+      prop_status = PropUnknown ;
+      prop_kind = Invariant ;
+      prop_expr = None;
+    }
+  in
+  let props = List.map create_candidate os_invs in
+  let props = props @ (TSys.get_properties sys) in
+  TSys.set_subsystem_properties sys (TSys.scope_of_trans_sys sys) props
+
 let load_cached_invariants sys cache_file =
   let ic = open_in cache_file in
   let lexbuf = Lexing.from_channel ic in
@@ -757,15 +777,11 @@ let load_cached_invariants sys cache_file =
   close_in ic ;
   sexps
   |> List.fold_left (fun acc sexp ->
-    let invar = NativeInput.term_of_sexpr sexp in
-    let cert = (-1, invar) in (* dummy certificate, no proof recorded *)
-    let two_state =
-      match Term.var_offsets_of_term invar with
-      | Some lo, Some up -> not (Numeral.equal lo up)
-      | _ -> false
-    in
-    TSys.add_invariant acc invar cert two_state |> ignore ;
-    acc
+    try
+      let invar = NativeInput.term_of_sexpr sexp in
+      add_as_candidate [invar] acc |> ignore ;
+      acc
+    with _ -> acc
   ) sys
 
 (** Performs an analysis. *)
@@ -1147,10 +1163,7 @@ let run in_sys =
               let file = List.hd (List.rev (String.split_on_char '/' in_file)) in
               let name = List.hd (String.split_on_char '.' file) in
 
-              try
-                load_cached_invariants sys (name ^ ".txt")
-              with
-              | e -> sys
+              load_cached_invariants sys (name ^ ".txt")
         in
 
         (* Format.printf "%a" (TSys.pp_print_subsystems true) sys; *)
