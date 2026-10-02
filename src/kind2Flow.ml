@@ -771,18 +771,20 @@ let add_as_candidate os_invs sys =
   TSys.set_subsystem_properties sys (TSys.scope_of_trans_sys sys) props
 
 let load_cached_invariants sys cache_file =
-  let ic = open_in cache_file in
-  let lexbuf = Lexing.from_channel ic in
-  let sexps = SExprParser.sexps SExprLexer.main lexbuf in
-  close_in ic ;
-  sexps
-  |> List.fold_left (fun acc sexp ->
-    try
-      let invar = NativeInput.term_of_sexpr sexp in
-      add_as_candidate [invar] acc |> ignore ;
-      acc
-    with _ -> acc
-  ) sys
+  try
+    let ic = open_in cache_file in
+    let lexbuf = Lexing.from_channel ic in
+    let sexps = SExprParser.sexps SExprLexer.main lexbuf in
+    close_in ic ;
+    sexps
+    |> List.fold_left (fun acc sexp ->
+      try
+        let invar = NativeInput.term_of_sexpr sexp in
+        add_as_candidate [invar] acc |> ignore ;
+        acc
+      with _ -> acc
+    ) sys
+  with _ ->  sys
 
 (** Performs an analysis. *)
 let analyze msg_setup save_results ignore_props stop_if_falsified slice_to_prop modules in_sys param sys =
