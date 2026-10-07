@@ -776,14 +776,12 @@ let load_cached_invariants sys cache_file =
     let lexbuf = Lexing.from_channel ic in
     let sexps = SExprParser.sexps SExprLexer.main lexbuf in
     close_in ic ;
-    sexps
-    |> List.fold_left (fun acc sexp ->
-      try
-        let invar = NativeInput.term_of_sexpr sexp in
-        add_as_candidate [invar] acc |> ignore ;
-        acc
-      with _ -> acc
-    ) sys
+    let invars =
+      List.filter_map (fun sexp ->
+        try Some (NativeInput.term_of_sexpr sexp) with _ -> None
+      ) sexps
+    in
+    add_as_candidate invars sys
   with _ ->  sys
 
 (** Performs an analysis. *)
