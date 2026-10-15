@@ -940,11 +940,11 @@ module RunCacheInvs : PostAnalysis = struct
         match Flags.cache_invs () with 
           | false -> Ok ()
           | true ->
-            let in_file = Flags.input_file () in
-            let file = List.hd (List.rev (String.split_on_char '/' in_file)) in
-            let name = List.hd (String.split_on_char '.' file) in
+            let dirname = Flags.output_dir () in
 
-            let oc = open_out (name ^ ".txt") in
+            mk_dir dirname;
+
+            let oc = open_out (dirname ^ ".invariants.txt") in
             let fmt = Format.formatter_of_out_channel oc in
             Format.pp_set_margin fmt 1_000_000 ;   (* disable line wrapping *)
 
