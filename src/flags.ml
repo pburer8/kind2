@@ -3346,7 +3346,7 @@ module Global = struct
     (bool_arg cache_invs)
     (fun fmt ->
       Format.fprintf fmt "\
-        Cache invariants in a file (name_of_lustre.log) for later reuse \
+        Cache invariants in a file for later reuse.@ \
         Default: false")
 
   let cache_invs () = !cache_invs
@@ -3358,7 +3358,7 @@ module Global = struct
       (bool_arg read_invs)
       (fun fmt ->
         Format.fprintf fmt "\
-        Read invariants from a file (name_of_lustre.log) to sidestep recalculation \
+        Read invariants from a file to sidestep recalculation.@ \
         Default: false")
 
   let read_invs () = !read_invs
