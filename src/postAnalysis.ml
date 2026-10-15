@@ -922,10 +922,13 @@ module RunMCS: PostAnalysis = struct
     )
 end
 
+
 module RunCacheInvs : PostAnalysis = struct
   let name = "cacheinvs"
   let title = "cache invariants"
   let is_active () = Flags.cache_invs ()
+
+  
 
   let run in_sys param _ results =
     let top = (Analysis.info_of_param param).Analysis.top in
@@ -944,13 +947,26 @@ module RunCacheInvs : PostAnalysis = struct
 
             mk_dir dirname;
 
-            let oc = open_out (dirname ^ ".invariants.txt") in
+            let oc = open_out (dirname ^ "/invariants.txt") in
             let fmt = Format.formatter_of_out_channel oc in
             Format.pp_set_margin fmt 1_000_000 ;   (* disable line wrapping *)
 
+            Format.fprintf fmt "%s@." (NativeInput.structural_form sys) ;
+
+            let sv_key sv = Format.asprintf "%a" StateVar.pp_print_state_var sv in
+
+            let pp_inv fmt inv =
+              let svs = Term.state_vars_of_term inv |> StateVar.StateVarSet.elements in
+              Format.fprintf fmt "(inv (%a) %a)"
+                (Format.pp_print_list ~pp_sep:Format.pp_print_space (fun fmt sv ->
+                   Format.fprintf fmt "(%s %a)" (sv_key sv)
+                     Type.pp_print_type (StateVar.type_of_state_var sv)))
+                svs
+                NativeInput.pp_print_term inv
+            in
             List.iter
               (fun inv ->
-                Format.fprintf fmt "%a@." NativeInput.pp_print_term inv
+                Format.fprintf fmt "%a@." pp_inv inv
               )
             invs_min ;
             close_out oc;

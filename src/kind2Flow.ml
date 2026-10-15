@@ -31,6 +31,10 @@ module C2I = C2I
 
 module Signals = TermLib.Signals
 
+module SM = Map.Make (String)
+module HS = HStringSExpr
+module SS = Set.Make (String)
+
 open Lib
 open ProcessCall
 
@@ -940,20 +944,152 @@ let add_as_candidate os_invs sys =
   let props = props @ (TSys.get_properties sys) in
   TSys.set_subsystem_properties sys (TSys.scope_of_trans_sys sys) props
 
-let load_cached_invariants sys cache_file =
-  try
-    let ic = open_in cache_file in
-    let lexbuf = Lexing.from_channel ic in
-    let sexps = SExprParser.sexps SExprLexer.main lexbuf in
-    close_in ic ;
-    let invars =
-      List.filter_map (fun sexp ->
-        try Some (NativeInput.term_of_sexpr sexp) with _ -> None
-      ) sexps
-    in
-    add_as_candidate invars sys
-  with _ ->  sys
+let str = HString.string_of_hstring
 
+(* Identity of a state variable: the same printer the cache writer uses. *)
+let sv_key sv = Format.asprintf "%a" StateVar.pp_print_state_var sv
+
+let current_signature sys =
+  TSys.state_vars sys
+  |> List.fold_left
+       (fun m sv -> SM.add (sv_key sv) (StateVar.type_of_state_var sv) m)
+       SM.empty
+
+let type_of_sexpr =
+  GenericSMTLIBDriver.smtlib_string_sexpr_conv
+    .GenericSMTLIBDriver.type_of_sexpr
+
+(* Do all variables of one cached invariant exist, with the same type? *)
+type verdict = Keep | Missing of string | Retyped of string
+
+let check_signature cur sigs =
+  let rec go = function
+    | [] -> Keep
+    | HS.List [HS.Atom n; ty] :: rest -> (
+      let n = str n in
+      match SM.find_opt n cur with
+      | None -> Missing n
+      | Some t ->
+        if Type.equal_types t (type_of_sexpr ty) then go rest else Retyped n)
+    | _ -> Missing "<malformed signature>"
+  in
+  go sigs
+
+(* Walk the stored system and the new one in lockstep, building old->new
+   and its inverse. [None] means the two are not related by a renaming. *)
+let rec match_sexp ~old_vars ~new_vars st o n =
+  match o, n with
+  | HS.Atom a, HS.Atom b -> (
+    let a = str a and b = str b in
+    let sigma, inv = st in
+    match SS.mem a old_vars, SS.mem b new_vars with
+    | true, true -> (
+      match SM.find_opt a sigma, SM.find_opt b inv with
+      | None, None -> Some (SM.add a b sigma, SM.add b a inv)
+      | Some b', Some a' when b' = b && a' = a -> Some st
+      | _ -> None)
+    | false, false when a = b -> Some st
+    | _ -> None)
+  | HS.List os, HS.List ns when List.length os = List.length ns ->
+    List.fold_left2
+      (fun acc o n ->
+         Option.bind acc (fun st -> match_sexp ~old_vars ~new_vars st o n))
+      (Some st) os ns
+  | _ -> None
+
+(* One simultaneous pass, so a swap x<->y is handled correctly. *)
+let rec rename sigma = function
+  | HS.Atom a as s -> (
+    match SM.find_opt (str a) sigma with
+    | Some b -> HS.Atom (HString.mk_hstring b)
+    | None -> s)
+  | HS.List l -> HS.List (List.map (rename sigma) l)
+
+let head_is name = function
+  | HS.List (HS.Atom h :: _) -> str h = name
+  | _ -> false
+
+(* Variable names declared in a (system (vars (decl ...)) ...) entry. *)
+let old_vars_of = function
+  | HS.List (_ :: parts) -> (
+    match List.find_opt (head_is "vars") parts with
+    | Some (HS.List [_; HS.List decls]) ->
+      List.filter_map
+        (function
+          | HS.List (HS.Atom n :: _) -> Some (str n)
+          | _ -> None)
+        decls
+      |> SS.of_list
+    | _ -> SS.empty)
+  | _ -> SS.empty
+
+let parse_one s =
+  match SExprParser.sexps SExprLexer.main (Lexing.from_string s) with
+  | [x] -> Some x
+  | _ -> None
+  | exception _ -> None
+
+let load_cached_invariants sys cache_file =
+  match open_in cache_file with
+  | exception Sys_error _ -> sys
+  | ic ->
+    let sexps =
+      try SExprParser.sexps SExprLexer.main (Lexing.from_channel ic)
+      with _ -> []
+    in
+    close_in ic ;
+    let system_entries, inv_entries = List.partition (head_is "system") sexps in
+    let cur = current_signature sys in
+
+    (* Is the new system the stored one up to a renaming of variables? *)
+    let sigma =
+      match system_entries, parse_one (NativeInput.structural_form sys) with
+      | [old_system], Some new_system ->
+        let new_vars = SS.of_list (List.map fst (SM.bindings cur)) in
+        match_sexp
+          ~old_vars:(old_vars_of old_system) ~new_vars
+          (SM.empty, SM.empty) old_system new_system
+        |> Option.map fst
+      | _ -> None
+    in
+    ( match sigma with
+      | Some s ->
+        let renamed = SM.filter (fun a b -> a <> b) s in
+        if SM.is_empty renamed then
+          KEvent.log L_note "Cache: system unchanged."
+        else (
+          KEvent.log L_note "Cache: %d variable(s) renamed." (SM.cardinal renamed) ;
+          SM.iter (fun a b -> KEvent.log L_note "  %s -> %s" a b) renamed
+        )
+      | None ->
+        KEvent.log L_note
+          "Cache: system structure differs or is missing; \
+           keeping only invariants whose variables still exist." ) ;
+
+    let kept = ref [] and dropped = ref 0 in
+    let drop fmt =
+      incr dropped ;
+      Format.kasprintf (fun s -> KEvent.log L_debug "Cached invariant dropped: %s" s) fmt
+    in
+    List.iter
+      (fun entry ->
+         (* Rename first, so the signature check below runs against the
+            new names and also validates the types in the new system. *)
+         let entry = match sigma with Some s -> rename s entry | None -> entry in
+         match entry with
+         | HS.List [HS.Atom tag; HS.List sigs; term] when str tag = "inv" -> (
+           match check_signature cur sigs with
+           | Keep -> (
+             try kept := NativeInput.term_of_sexpr term :: !kept
+             with e -> drop "cannot parse (%s)" (Printexc.to_string e))
+           | Missing v -> drop "%s no longer exists" v
+           | Retyped v -> drop "%s changed type" v)
+         | _ -> drop "old-format or malformed entry")
+      inv_entries ;
+
+    KEvent.log L_note "Cached invariants: %d loaded as candidates, %d dropped."
+      (List.length !kept) !dropped ;
+    add_as_candidate (List.rev !kept) sys
 (** Performs an analysis. *)
 (* The parameter and system the engines of the analysis under way ran on
    last, when a recursive function was unrolled further (see [analyze]),
@@ -1426,7 +1562,7 @@ let run in_sys =
 
               let dirname = Flags.output_dir () in
 
-              load_cached_invariants sys (dirname ^ ".invariants.txt")
+              load_cached_invariants sys (dirname ^ "/invariants.txt")
         in
 
         (* Format.printf "%a" (TSys.pp_print_subsystems true) sys; *)

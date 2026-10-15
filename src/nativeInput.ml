@@ -799,6 +799,12 @@ let dump_native sys =
   in
   dump_native_to sys filename
 
+let structural_form sys =
+  Format.asprintf
+    "@[<v 1>(system@,(vars (%a))@,(init %a)@,(trans %a))@]"
+    (pp_print_list (pp_print_state_var sys) "@ ") (TransSys.state_vars sys)
+    pp_print_term (TransSys.init_of_bound None sys TransSys.init_base)
+    pp_print_term (TransSys.trans_of_bound None sys TransSys.trans_base)
 
 (* 
    Local Variables:
