@@ -943,31 +943,118 @@ let add_as_candidate os_invs sys =
   let props = props @ (TSys.get_properties sys) in
   TSys.set_subsystem_properties sys (TSys.scope_of_trans_sys sys) props
 
-type 'a edit = Same of 'a | Removed of 'a | Added of 'a
- 
-let myers_diff ~(equal : 'a -> 'a -> bool) (a : 'a array) (b : 'a array)
+let sv_key sv = Format.asprintf "%a" StateVar.pp_print_state_var sv
+
+let str = HString.string_of_hstring
+
+(* Identity of a state variable: the same printer the cache writer uses. *)
+let sv_key sv = Format.asprintf "%a" StateVar.pp_print_state_var sv
+
+let current_signature sys =
+  TSys.state_vars sys
+  |> List.fold_left
+       (fun m sv -> SM.add (sv_key sv) (StateVar.type_of_state_var sv) m)
+       SM.empty
+
+let type_of_sexpr =
+  GenericSMTLIBDriver.smtlib_string_sexpr_conv
+    .GenericSMTLIBDriver.type_of_sexpr
+
+(* Do all variables of one cached invariant exist, with the same type? *)
+type verdict = Keep | Missing of string | Retyped of string
+
+let check_signature cur sigs =
+  let rec go = function
+    | [] -> Keep
+    | HS.List [HS.Atom n; ty] :: rest -> (
+      let n = str n in
+      match SM.find_opt n cur with
+      | None -> Missing n
+      | Some t ->
+        if Type.equal_types t (type_of_sexpr ty) then go rest else Retyped n)
+    | _ -> Missing "<malformed signature>"
+  in
+  go sigs
+
+(* Walk the stored system and the new one in lockstep, building old->new
+   and its inverse. [None] means the two are not related by a renaming. *)
+let rec match_sexp ~old_vars ~new_vars st o n =
+  match o, n with
+  | HS.Atom a, HS.Atom b -> (
+    let a = str a and b = str b in
+    let sigma, inv = st in
+    match SS.mem a old_vars, SS.mem b new_vars with
+    | true, true -> (
+      match SM.find_opt a sigma, SM.find_opt b inv with
+      | None, None -> Some (SM.add a b sigma, SM.add b a inv)
+      | Some b', Some a' when b' = b && a' = a -> Some st
+      | _ -> None)
+    | false, false when a = b -> Some st
+    | _ -> None)
+  | HS.List os, HS.List ns when List.length os = List.length ns ->
+    List.fold_left2
+      (fun acc o n ->
+         Option.bind acc (fun st -> match_sexp ~old_vars ~new_vars st o n))
+      (Some st) os ns
+  | _ -> None
+
+(* One simultaneous pass, so a swap x<->y is handled correctly. *)
+let rec rename sigma = function
+  | HS.Atom a as s -> (
+    match SM.find_opt (str a) sigma with
+    | Some b -> HS.Atom (HString.mk_hstring b)
+    | None -> s)
+  | HS.List l -> HS.List (List.map (rename sigma) l)
+
+let head_is name = function
+  | HS.List (HS.Atom h :: _) -> str h = name
+  | _ -> false
+
+(* Variable names declared in a (system (vars (decl ...)) ...) entry. *)
+let old_vars_of = function
+  | HS.List (_ :: parts) -> (
+    match List.find_opt (head_is "vars") parts with
+    | Some (HS.List [_; HS.List decls]) ->
+      List.filter_map
+        (function
+          | HS.List (HS.Atom n :: _) -> Some (str n)
+          | _ -> None)
+        decls
+      |> SS.of_list
+    | _ -> SS.empty)
+  | _ -> SS.empty
+
+let parse_one s =
+  match SExprParser.sexps SExprLexer.main (Lexing.from_string s) with
+  | [x] -> Some x
+  | _ -> None
+  | exception _ -> None
+
+(* ---------- Myers O(ND) diff ---------- *)
+type 'a edit = Same of 'a | Del of 'a | Ins of 'a
+
+let myers_diff ~(eq : 'a -> 'a -> bool) (a : 'a array) (b : 'a array)
   : 'a edit list =
   let n = Array.length a and m = Array.length b in
-  let max_d = n + m in
-  let off = max_d in
-  let v = Array.make (2 * max_d + 2) 0 in
-  (* trace.(d) = copy of [v] before round [d], used to backtrack *)
+  let max = n + m in
+  let off = max in
+  let v = Array.make ((2 * max) + 2) 0 in
   let trace = ref [] in
   let found = ref false in
   let d = ref 0 in
-  while not !found && !d <= max_d do
+  while not !found && !d <= max do
     trace := Array.copy v :: !trace ;
     let k = ref (- !d) in
     while not !found && !k <= !d do
       let kk = !k in
       let x0 =
         if kk = - !d || (kk <> !d && v.(off + kk - 1) < v.(off + kk + 1))
-        then v.(off + kk + 1)         (* down: insertion *)
-        else v.(off + kk - 1) + 1     (* right: deletion *)
+        then v.(off + kk + 1)
+        else v.(off + kk - 1) + 1
       in
       let x = ref x0 in
       let y = ref (x0 - kk) in
-      while !x < n && !y < m && equal a.(!x) b.(!y) do incr x ; incr y done ;
+      while !x < n && !y < m && eq a.(!x) b.(!y) do incr x ; incr y done ;
       v.(off + kk) <- !x ;
       if !x >= n && !y >= m then found := true ;
       k := kk + 2
@@ -975,181 +1062,165 @@ let myers_diff ~(equal : 'a -> 'a -> bool) (a : 'a array) (b : 'a array)
     if not !found then incr d
   done ;
   let trace = Array.of_list (List.rev !trace) in
-  let edits = ref [] in
-  let x = ref n and y = ref m in
-  for d = Array.length trace - 1 downto 0 do
-    let v = trace.(d) in
+  let x = ref n and y = ref m and acc = ref [] in
+  for dd = !d downto 1 do
+    let vd = trace.(dd) in
     let k = !x - !y in
     let prev_k =
-      if k = -d || (k <> d && v.(off + k - 1) < v.(off + k + 1))
+      if k = -dd || (k <> dd && vd.(off + k - 1) < vd.(off + k + 1))
       then k + 1 else k - 1
     in
-    let prev_x = v.(off + prev_k) in
+    let prev_x = vd.(off + prev_k) in
     let prev_y = prev_x - prev_k in
     while !x > prev_x && !y > prev_y do
-      decr x ; decr y ;
-      edits := Same a.(!x) :: !edits
+      acc := Same a.(!x - 1) :: !acc ; decr x ; decr y
     done ;
-    if d > 0 then begin
-      if !x = prev_x then (decr y ; edits := Added b.(!y) :: !edits)
-      else (decr x ; edits := Removed a.(!x) :: !edits)
-    end ;
+    if !x = prev_x then acc := Ins b.(!y - 1) :: !acc
+    else acc := Del a.(!x - 1) :: !acc ;
     x := prev_x ; y := prev_y
   done ;
-  !edits
- 
-(* Structural equality on s-expressions (atoms are hash-consed). *)
-let rec sexpr_equal a b = match a, b with
-  | HStringSExpr.Atom x, HStringSExpr.Atom y -> x == y
-  | HStringSExpr.List l1, HStringSExpr.List l2 ->
-    List.length l1 = List.length l2 && List.for_all2 sexpr_equal l1 l2
-  | _ -> false
- 
-let rec sexpr_atoms acc = function
-  | HStringSExpr.Atom a -> HString.string_of_hstring a :: acc
-  | HStringSExpr.List l -> List.fold_left sexpr_atoms acc l
- 
-(* Splits the header written by [NativeInput.structural_form],
-   (system (vars (...)) (init ...) (trans ...)),
-   into its variable declarations, init and trans. *)
-let cache_header = function
-  | HStringSExpr.(List [ Atom _ ;
-                         List [ Atom _ ; List vars ] ;
-                         List [ Atom _ ; init ] ;
-                         List [ Atom _ ; trans ] ]) ->
-    Some (vars, init, trans)
-  | _ -> None
- 
-(* Renames the atoms of an s-expression according to [map] (simultaneously). *)
-let rec sexpr_rename map = function
-  | HStringSExpr.Atom a as s ->
-    (match List.assoc_opt (HString.string_of_hstring a) map with
-     | Some n -> HStringSExpr.Atom (HString.mk_hstring n)
-     | None -> s)
-  | HStringSExpr.List l -> HStringSExpr.List (List.map (sexpr_rename map) l)
- 
-(* A variable declaration (name type [flags...]) as (name, shape). *)
-let decl_parts = function
-  | HStringSExpr.(List (Atom n :: shape)) ->
-    Some (HString.string_of_hstring n, shape)
-  | _ -> None
- 
-let same_shape s1 s2 =
-  List.length s1 = List.length s2 && List.for_all2 sexpr_equal s1 s2
- 
-(* Pairs each removed variable with an added one of the same type and flags,
-   in order. The boolean tells whether the pairing is ambiguous, i.e. several
-   removed or several added variables share that shape. *)
-let pair_renames removed added =
-  let used = ref [] in
-  List.filter_map (fun (old_n, shape) ->
-    let free (n, s) = not (List.mem n !used) && same_shape s shape in
-    match List.find_opt free added with
-    | None -> None
-    | Some (new_n, _) ->
-      used := new_n :: !used ;
-      let count l = List.length (List.filter (fun (_, s) -> same_shape s shape) l) in
-      Some (old_n, new_n, count removed > 1 || count added > 1)
-  ) removed
+  while !x > 0 && !y > 0 do
+    acc := Same a.(!x - 1) :: !acc ; decr x ; decr y
+  done ;
+  !acc
+
+(* ---------- Declarations and rename extraction ---------- *)
+type decl = { name : string; shape : string }  (* shape = type + flags *)
+
+type var_diff = {
+  renamed : (string * string) list;  (* old, new *)
+  removed : string list;
+  added : string list;
+}
+
+(* Within one changed hunk, pair deletions with insertions of the same
+   shape, in order, but only when the counts for that shape are equal. *)
+let pair_hunk dels inss =
+  let shapes = List.sort_uniq compare (List.map (fun d -> d.shape) dels) in
+  let renamed, paired_old, paired_new =
+    List.fold_left
+      (fun (r, po, pn) sh ->
+         let ds = List.filter (fun d -> d.shape = sh) dels in
+         let is = List.filter (fun d -> d.shape = sh) inss in
+         if List.length ds = List.length is then
+           (r @ List.map2 (fun o n -> (o.name, n.name)) ds is,
+            po @ ds, pn @ is)
+         else (r, po, pn))
+      ([], [], []) shapes
+  in
+  let not_in l x = not (List.memq x l) in
+  (renamed,
+   List.filter (not_in paired_old) dels,
+   List.filter (not_in paired_new) inss)
+
+let diff_vars old_decls new_decls =
+  let eq a b = a.name = b.name && a.shape = b.shape in
+  let edits =
+    myers_diff ~eq (Array.of_list old_decls) (Array.of_list new_decls) in
+  let ren = ref [] and rem = ref [] and add = ref [] in
+  let flush dels inss =
+    let r, d, i = pair_hunk (List.rev dels) (List.rev inss) in
+    ren := !ren @ r ; rem := !rem @ d ; add := !add @ i
+  in
+  let dels, inss =
+    List.fold_left
+      (fun (dels, inss) -> function
+         | Same _ -> flush dels inss ; ([], [])
+         | Del x -> (x :: dels, inss)
+         | Ins x -> (dels, x :: inss))
+      ([], []) edits
+  in
+  flush dels inss ;
+  { renamed = !ren;
+    removed = List.map (fun d -> d.name) !rem;
+    added = List.map (fun d -> d.name) !add }
+
+(* ---------- Reading declarations from the cached system ---------- *)
+let rec sexp_str = function
+  | HS.Atom a -> str a
+  | HS.List l -> "(" ^ String.concat " " (List.map sexp_str l) ^ ")"
+
+let decls_of = function
+  | HS.List (_ :: parts) -> (
+    match List.find_opt (head_is "vars") parts with
+    | Some (HS.List [_; HS.List decls]) ->
+      List.filter_map
+        (function
+          | HS.List (HS.Atom n :: rest) ->
+            Some { name = str n; shape = sexp_str (HS.List rest) }
+          | _ -> None)
+        decls
+    | _ -> [])
+  | _ -> []
 
 let load_cached_invariants sys cache_file =
-  try
+  match open_in cache_file with
+  | exception Sys_error _ -> sys
+  | ic ->
     let sexps =
-      let ic = open_in cache_file in
-      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-        SExprParser.sexps SExprLexer.main (Lexing.from_channel ic)
-      )
+      try SExprParser.sexps SExprLexer.main (Lexing.from_channel ic)
+      with _ -> []
     in
-    let cached, inv_sexps =
-      match sexps with
-      | h :: t ->
-        (match cache_header h with Some c -> Some c, t | None -> None, sexps)
-      | [] -> None, []
+    close_in ic ;
+    let system_entries, inv_entries = List.partition (head_is "system") sexps in
+    let cur = current_signature sys in
+
+    (* Is the new system the stored one up to a renaming of variables? *)
+    let sigma =
+      match system_entries, parse_one (NativeInput.structural_form sys) with
+      | [old_system], Some new_system -> (
+        let new_vars = SS.of_list (List.map fst (SM.bindings cur)) in
+        match
+          match_sexp ~old_vars:(old_vars_of old_system) ~new_vars
+            (SM.empty, SM.empty) old_system new_system
+        with
+        | Some (s, _) -> Some s
+        | None ->
+          let vd = diff_vars (decls_of old_system) (decls_of new_system) in
+          List.iter
+            (fun (a, b) -> KEvent.log L_note "Cache: guessed rename %s -> %s" a b)
+            vd.renamed ;
+          Some (SM.of_seq (List.to_seq vd.renamed)))
+      | _ -> None
     in
-    let renames, stale =
-      match cached with
-      | None -> [], []
-      | Some (c_vars, c_init, c_trans) ->
-        let current =
-          NativeInput.structural_form sys
-          |> Lexing.from_string
-          |> SExprParser.sexps SExprLexer.main
-          |> (function h :: _ -> cache_header h | [] -> None)
-        in
-        match current with
-        | None -> [], []
-        | Some (n_vars, n_init, n_trans) ->
-          let edits =
-            myers_diff ~equal:sexpr_equal
-              (Array.of_list c_vars) (Array.of_list n_vars)
-          in
-          let decls pick =
-            List.filter_map (fun e ->
-              match pick e with Some d -> decl_parts d | None -> None
-            ) edits
-          in
-          let removed = decls (function Removed d -> Some d | _ -> None) in
-          let added = decls (function Added d -> Some d | _ -> None) in
-          let candidates = pair_renames removed added in
-          let map = List.map (fun (o, n, _) -> (o, n)) candidates in
-          let used_in_system =
-            sexpr_atoms (sexpr_atoms [] c_init) c_trans
-          in
-          (* The rename is confirmed if it makes the cached system match the
-             current one, and actually concerns variables the system uses. *)
-          let verified =
-            List.exists (fun (o, _) -> List.mem o used_in_system) map
-            && sexpr_equal (sexpr_rename map c_init) n_init
-            && sexpr_equal (sexpr_rename map c_trans) n_trans
-          in
-          if not (verified || (sexpr_equal c_init n_init
-                               && sexpr_equal c_trans n_trans))
-          then
-            KEvent.log L_info
-              "Cached invariants come from a different transition system, \
-               loading them as candidates only." ;
-          let accepted =
-            if verified then map
-            else
-              List.filter_map (fun (o, n, ambiguous) ->
-                if ambiguous then None else Some (o, n)
-              ) candidates
-          in
-          let stale =
-            List.filter_map (fun (o, _) ->
-              if List.mem_assoc o accepted then None else Some o
-            ) removed
-          in
-          accepted, stale
+    ( match sigma with
+      | Some s ->
+        let renamed = SM.filter (fun a b -> a <> b) s in
+        if SM.is_empty renamed then
+          KEvent.log L_note "Cache: system unchanged."
+        else (
+          KEvent.log L_note "Cache: %d variable(s) renamed." (SM.cardinal renamed) ;
+          SM.iter (fun a b -> KEvent.log L_note "  %s -> %s" a b) renamed
+        )
+      | None ->
+        KEvent.log L_note
+          "Cache: system structure differs or is missing; \
+           keeping only invariants whose variables still exist." ) ;
+
+    let kept = ref [] and dropped = ref 0 in
+    let drop fmt =
+      incr dropped ;
+      Format.kasprintf (fun s -> KEvent.log L_debug "Cached invariant dropped: %s" s) fmt
     in
-    if renames <> [] then
-      KEvent.log L_info "Cached invariants: renamed variables %s."
-        (String.concat ", "
-           (List.map (fun (o, n) -> o ^ " -> " ^ n) renames)) ;
-    let is_stale sexp =
-      stale <> [] &&
-      List.exists (fun a -> List.mem a stale) (sexpr_atoms [] sexp)
-    in
-    let kept =
-      inv_sexps
-      |> List.filter (fun s -> not (is_stale s))
-      |> List.map (sexpr_rename renames)
-    in
-    let invars =
-      List.filter_map (fun sexp ->
-        try Some (NativeInput.term_of_sexpr sexp) with _ -> None
-      ) kept
-    in
-    KEvent.log L_info
-      "Loaded %d of %d cached invariants (%d renamed, %d variables dropped)."
-      (List.length invars) (List.length inv_sexps)
-      (List.length renames) (List.length stale) ;
-    add_as_candidate invars sys
-  with e ->
-    KEvent.log L_warn
-      "Could not load cached invariants from %s: %s"
-      cache_file (Printexc.to_string e) ;
-    sys
+    List.iter
+      (fun entry ->
+         (* Rename first, so the signature check below runs against the
+            new names and also validates the types in the new system. *)
+         let entry = match sigma with Some s -> rename s entry | None -> entry in
+         match entry with
+         | HS.List [HS.Atom tag; HS.List sigs; term] when str tag = "inv" -> (
+           match check_signature cur sigs with
+           | Keep -> (
+             try kept := NativeInput.term_of_sexpr term :: !kept
+             with e -> drop "cannot parse (%s)" (Printexc.to_string e))
+           | Missing v -> drop "%s no longer exists" v
+           | Retyped v -> drop "%s changed type" v)
+         | _ -> drop "old-format or malformed entry")
+      inv_entries ;
+
+    KEvent.log L_note "Cached invariants: %d loaded as candidates, %d dropped."
+      (List.length !kept) !dropped ;
+    add_as_candidate (List.rev !kept) sys
 
 (* in kind2Flow.ml, near the top-level helpers, before `analyze` / the loop *)
 
