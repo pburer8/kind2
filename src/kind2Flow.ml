@@ -1123,7 +1123,7 @@ let load_cached_invariants sys cache_file =
           accepted, stale
     in
     if renames <> [] then
-      KEvent.log L_note "Cached invariants: renamed variables %s."
+      KEvent.log L_info "Cached invariants: renamed variables %s."
         (String.concat ", "
            (List.map (fun (o, n) -> o ^ " -> " ^ n) renames)) ;
     let is_stale sexp =
@@ -1140,13 +1140,13 @@ let load_cached_invariants sys cache_file =
         try Some (NativeInput.term_of_sexpr sexp) with _ -> None
       ) kept
     in
-    KEvent.log L_note
+    KEvent.log L_info
       "Loaded %d of %d cached invariants (%d renamed, %d variables dropped)."
       (List.length invars) (List.length inv_sexps)
       (List.length renames) (List.length stale) ;
     add_as_candidate invars sys
   with e ->
-    KEvent.log L_note
+    KEvent.log L_warn
       "Could not load cached invariants from %s: %s"
       cache_file (Printexc.to_string e) ;
     sys
