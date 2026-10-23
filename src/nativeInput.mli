@@ -48,8 +48,6 @@ val pp_print_term : Format.formatter -> Term.t -> unit
 
 val structural_form : TransSys.t -> string
 
-val conv_type_of_sexpr : HStringSExpr.t -> Type.t
-
 
 (* 
    Local Variables:
