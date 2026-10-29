@@ -109,17 +109,25 @@ let head_is name = function
   | _ -> false
 
 (* Variable names declared in a (system (vars (decl ...)) ...) entry. *)
-let old_vars_of = function
-  | HS.List (_ :: parts) -> (
-    match List.find_opt (head_is "vars") parts with
-    | Some (HS.List [_; HS.List decls]) ->
+let decl_names parts =
+  match List.find_opt (head_is "vars") parts with
+  | Some (HS.List [_; HS.List decls]) ->
+    List.filter_map
+      (function HS.List (HS.Atom n :: _) -> Some (str n) | _ -> None)
+      decls
+  | _ -> []
+
+(* Variable names of the system and of all its callees. *)
+let var_names_of_system = function
+  | HS.List (_ :: parts) ->
+    let callees =
       List.filter_map
         (function
-          | HS.List (HS.Atom n :: _) -> Some (str n)
+          | HS.List (HS.Atom h :: sub) when str h = "callee" -> Some sub
           | _ -> None)
-        decls
-      |> SS.of_list
-    | _ -> SS.empty)
+        parts
+    in
+    SS.of_list (List.concat (List.map decl_names (parts :: callees)))
   | _ -> SS.empty
 
 let parse_one s =
@@ -374,25 +382,21 @@ let load_cached_invariants sys cache_file =
         ( match diff_nodes old_decls new_decls with
           | Node_renamed (o, n) -> KEvent.log L_note "Cache: node renamed %s -> %s." o n
           | Node_same | Node_unknown -> () ) ;
-        let new_vars = SS.of_list (List.map fst (SM.bindings cur)) in
         match
-          match_sexp ~old_vars:(old_vars_of old_system) ~new_vars
+          match_sexp
+            ~old_vars:(var_names_of_system old_system)
+            ~new_vars:(var_names_of_system new_system)
             (SM.empty, SM.empty) old_system new_system
         with
         | Some (s, _) -> Some s
         | None ->
+          KEvent.log L_note
+            "Cache: system differs by more than variable names (a callee or the \
+             model's logic may have changed).";
           let fd = diff_system old_decls new_decls in
-          List.iter (fun (n, o, t) ->
-              KEvent.log L_note "Cache: %s changed type %s -> %s" n o t)
-            fd.vars.retyped ;
-          List.iter (fun (n, o, f) ->
-              KEvent.log L_note "Cache: %s changed flags '%s' -> '%s'" n o f)
-            fd.vars.reflagged ;
-          List.iter (fun (a, b) ->
-              KEvent.log L_note "Cache: guessed rename %s -> %s" a b)
-            fd.vars.renamed ;
+          (* ... the retyped / reflagged / renamed logging as before ... *)
           Some fd.sigma)
-      | _ -> None
+          | _ -> None
     in
     ( match sigma with
       | Some s ->

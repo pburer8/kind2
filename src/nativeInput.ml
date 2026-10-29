@@ -776,13 +776,30 @@ let pp_print_one_native ppf sys =
     pp_print_subsystems sys
     pp_print_props sys
 
-let structural_form sys =
-  Format.asprintf
-    "@[<v 1>(system@,(vars (%a))@,(init %a)@,(trans %a))@]"
+(* Declarations, init and trans of one system. The scope name is left out so
+   that renaming a node doesn't, on its own, change this text. *)
+let pp_structural_parts ppf sys =
+  Format.fprintf ppf "(vars (%a))@,(init %a)@,(trans %a)"
     (pp_print_list (pp_print_state_var sys) "@ ") (TransSys.state_vars sys)
     pp_print_term (TransSys.init_of_bound None sys TransSys.init_base)
     pp_print_term (TransSys.trans_of_bound None sys TransSys.trans_base)
 
+(* The system, followed by one (callee ...) entry per distinct subsystem. *)
+let structural_form sys =
+  (* all_systems lists subsystems first and sys itself last, and skips
+     duplicates, so drop sys by scope to keep only the callees. *)
+  let callees =
+    List.filter
+      (fun s -> not (TransSys.equal_scope s sys))
+      (all_systems sys)
+  in
+  Format.asprintf "@[<v 1>(system@,%a%a)@]"
+    pp_structural_parts sys
+    (fun ppf cs ->
+       List.iter
+         (fun c -> Format.fprintf ppf "@,(callee@,%a)" pp_structural_parts c)
+         cs)
+    callees
 let pp_print_native ppf sys = 
   List.iter (pp_print_one_native ppf) (all_systems sys)
 
