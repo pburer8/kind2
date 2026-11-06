@@ -17,4 +17,4 @@
 *)
 
 (** Load cached invariants *)
-val load_cached_invariants : TransSys.t -> string -> TransSys.t
+val load_cached_invariants : TransSys.t -> TransSys.t

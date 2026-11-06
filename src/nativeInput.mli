@@ -50,6 +50,9 @@ val structural_form : TransSys.t -> string
 
 val conv_type_of_sexpr : HStringSExpr.t -> Type.t
 
+val cache_file_prefix : unit -> string
+
+val cache_file_of_scope : string list -> string
 
 (* 
    Local Variables:

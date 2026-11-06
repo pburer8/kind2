@@ -362,77 +362,145 @@ let diff_system old_decls new_decls =
   in
   { node; sigma; vars }
 
-let load_cached_invariants sys cache_file =
-  match open_in cache_file with
-  | exception Sys_error _ -> sys
+let has_prefix p s =
+  String.length s >= String.length p && String.sub s 0 (String.length p) = p
+
+let has_suffix x s =
+  let ls = String.length s and lx = String.length x in
+  ls >= lx && String.sub s (ls - lx) lx = x
+
+let read_cache_file path =
+  match open_in path with
+  | exception Sys_error _ -> None
   | ic ->
-    let sexps =
-      try SExprParser.sexps SExprLexer.main (Lexing.from_channel ic)
-      with _ -> []
+    let r =
+      try Some (SExprParser.sexps SExprLexer.main (Lexing.from_channel ic))
+      with _ -> None
     in
     close_in ic ;
-    let system_entries, inv_entries = List.partition (head_is "system") sexps in
-    let cur = current_signature sys in
+    r
 
-    (* Is the new system the stored one up to a renaming of variables? *)
-    let sigma =
-      match system_entries, parse_one (NativeInput.structural_form sys) with
-      | [old_system], Some new_system -> (
-        let old_decls = decls_of old_system and new_decls = decls_of new_system in
-        ( match diff_nodes old_decls new_decls with
-          | Node_renamed (o, n) -> KEvent.log L_note "Cache: node renamed %s -> %s." o n
+(* Other nodes' cache files, for finding the cache of a renamed node. *)
+let sibling_cache_files ~except =
+  let prefix = NativeInput.cache_file_prefix () in
+  let dir = Filename.dirname prefix in
+  let base = Filename.basename prefix ^ "." in
+  match Sys.readdir dir with
+  | exception Sys_error _ -> []
+  | names ->
+    Array.to_list names
+    |> List.filter (fun f ->
+        has_prefix base f && has_suffix ".txt" f
+        && f <> Filename.basename except)
+    |> List.sort compare
+    |> List.map (Filename.concat dir)
+
+type cache_match =
+  | Exact of string SM.t * node_change  (* same up to renaming *)
+  | Approx of full_diff                 (* differs; guess from declarations *)
+  | Unrelated                           (* no usable (system ...) entry *)
+
+let classify_cache sys sexps =
+  match List.filter (head_is "system") sexps,
+        parse_one (NativeInput.structural_form sys) with
+  | [old_system], Some new_system -> (
+    let old_decls = decls_of old_system and new_decls = decls_of new_system in
+    match
+      match_sexp
+        ~old_vars:(var_names_of_system old_system)
+        ~new_vars:(var_names_of_system new_system)
+        (SM.empty, SM.empty) old_system new_system
+    with
+    | Some (s, _) -> Exact (s, diff_nodes old_decls new_decls)
+    | None -> Approx (diff_system old_decls new_decls))
+  | _ -> Unrelated
+
+let install_cached sys sexps plan =
+  let inv_entries = List.filter (fun e -> not (head_is "system" e)) sexps in
+  let cur = current_signature sys in
+  let sigma =
+    match plan with
+    | Exact (s, node) ->
+      if not (SM.exists (fun a b -> a <> b) s) then
+        KEvent.log L_note "Cache: system unchanged."
+      else (
+        ( match node with
+          | Node_renamed (o, n) ->
+            KEvent.log L_note "Cache: node renamed %s -> %s." o n
           | Node_same | Node_unknown -> () ) ;
-        match
-          match_sexp
-            ~old_vars:(var_names_of_system old_system)
-            ~new_vars:(var_names_of_system new_system)
-            (SM.empty, SM.empty) old_system new_system
-        with
-        | Some (s, _) -> Some s
-        | None ->
-          KEvent.log L_note
-            "Cache: system differs by more than variable names (a callee or the \
-             model's logic may have changed).";
-          let fd = diff_system old_decls new_decls in
-          (* ... the retyped / reflagged / renamed logging as before ... *)
-          Some fd.sigma)
-          | _ -> None
-    in
-    ( match sigma with
-      | Some s ->
-        let renamed = SM.filter (fun a b -> a <> b && not (is_node_only_rename a b)) s in
-        if SM.is_empty renamed then
-          KEvent.log L_note "Cache: system unchanged."
-        else (
-          KEvent.log L_note "Cache: %d variable(s) renamed." (SM.cardinal renamed) ;
-          SM.iter (fun a b -> KEvent.log L_note "  %s -> %s" a b) renamed
-        )
-      | None ->
-        KEvent.log L_note
-          "Cache: system structure differs or is missing; \
-           keeping only invariants whose variables still exist." ) ;
+        SM.iter
+          (fun a b ->
+             if a <> b && not (is_node_only_rename a b) then
+               KEvent.log L_note "Cache: renamed %s -> %s" a b)
+          s
+      ) ;
+      Some s
+    | Approx fd ->
+      KEvent.log L_note
+        "Cache: system differs by more than variable names (a callee or the \
+         model's logic may have changed)." ;
+      List.iter (fun (n, o, t) ->
+          KEvent.log L_note "Cache: %s changed type %s -> %s" n o t)
+        fd.vars.retyped ;
+      List.iter (fun (n, o, f) ->
+          KEvent.log L_note "Cache: %s changed flags '%s' -> '%s'" n o f)
+        fd.vars.reflagged ;
+      List.iter (fun (a, b) ->
+          KEvent.log L_note "Cache: guessed rename %s -> %s" a b)
+        fd.vars.renamed ;
+      Some fd.sigma
+    | Unrelated ->
+      KEvent.log L_note
+        "Cache: no system recorded; keeping invariants whose variables \
+         still exist." ;
+      None
+  in
+  let kept = ref [] and dropped = ref 0 in
+  let drop fmt =
+    incr dropped ;
+    Format.kasprintf
+      (fun s -> KEvent.log L_debug "Cached invariant dropped: %s" s) fmt
+  in
+  List.iter
+    (fun entry ->
+       let entry = match sigma with Some s -> rename s entry | None -> entry in
+       match entry with
+       | HS.List [HS.Atom tag; HS.List sigs; term] when str tag = "inv" -> (
+         match check_signature cur sigs with
+         | Keep -> (
+           try kept := NativeInput.term_of_sexpr term :: !kept
+           with e -> drop "cannot parse (%s)" (Printexc.to_string e))
+         | Missing v -> drop "%s no longer exists" v
+         | Retyped v -> drop "%s changed type" v)
+       | _ -> drop "old-format or malformed entry")
+    inv_entries ;
+  KEvent.log L_note "Cached invariants: %d loaded as candidates, %d dropped."
+    (List.length !kept) !dropped ;
+  add_as_candidate (List.rev !kept) sys
 
-    let kept = ref [] and dropped = ref 0 in
-    let drop fmt =
-      incr dropped ;
-      Format.kasprintf (fun s -> KEvent.log L_debug "Cached invariant dropped: %s" s) fmt
+let load_cached_invariants sys =
+  let own = NativeInput.cache_file_of_scope (TSys.scope_of_trans_sys sys) in
+  if Sys.file_exists own then (
+    match read_cache_file own with
+    | Some sexps -> install_cached sys sexps (classify_cache sys sexps)
+    | None ->
+      KEvent.log L_note "Cache: could not read %s." own ;
+      sys
+  ) else
+    (* No cache under this node's name. If the node was renamed, another
+       node's file may match this one up to renaming. Accept only an exact
+       match, so an unrelated node's cache is never borrowed on a guess. *)
+    let rec try_siblings = function
+      | [] -> sys
+      | f :: rest -> (
+        match read_cache_file f with
+        | Some sexps -> (
+          match classify_cache sys sexps with
+          | Exact _ as plan ->
+            KEvent.log L_note
+              "Cache: no file for this node; using %s (matches up to renaming)." f ;
+            install_cached sys sexps plan
+          | Approx _ | Unrelated -> try_siblings rest)
+        | None -> try_siblings rest)
     in
-    List.iter
-      (fun entry ->
-         (* Rename first, so the signature check below runs against the
-            new names and also validates the types in the new system. *)
-         let entry = match sigma with Some s -> rename s entry | None -> entry in
-         match entry with
-         | HS.List [HS.Atom tag; HS.List sigs; term] when str tag = "inv" -> (
-           match check_signature cur sigs with
-           | Keep -> (
-             try kept := NativeInput.term_of_sexpr term :: !kept
-             with e -> drop "cannot parse (%s)" (Printexc.to_string e))
-           | Missing v -> drop "%s no longer exists" v
-           | Retyped v -> drop "%s changed type" v)
-         | _ -> drop "old-format or malformed entry")
-      inv_entries ;
-
-    KEvent.log L_note "Cached invariants: %d loaded as candidates, %d dropped."
-      (List.length !kept) !dropped ;
-    add_as_candidate (List.rev !kept) sys
+    try_siblings (sibling_cache_files ~except:own)

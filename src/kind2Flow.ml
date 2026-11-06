@@ -1390,9 +1390,7 @@ let run in_sys =
             | false -> sys
             | true -> 
 
-              let dirname = Flags.output_dir () in
-
-              LoadInvs.load_cached_invariants sys (dirname ^ "/invariants.txt")
+              LoadInvs.load_cached_invariants sys
         in
 
         (* Format.printf "%a" (TSys.pp_print_subsystems true) sys; *)

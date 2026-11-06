@@ -928,64 +928,57 @@ module RunCacheInvs : PostAnalysis = struct
   let title = "cache invariants"
   let is_active () = Flags.cache_invs ()
 
-  
+  let sv_key sv = Format.asprintf "%a" StateVar.pp_print_state_var sv
+
+  let pp_inv fmt inv =
+    let svs = Term.state_vars_of_term inv |> StateVar.StateVarSet.elements in
+    Format.fprintf fmt "(inv (%a) %a)"
+      (pp_print_list
+         (fun fmt sv ->
+            Format.fprintf fmt "(%s %a)" (sv_key sv)
+              Type.pp_print_type (StateVar.type_of_state_var sv))
+         "@ ")
+      svs
+      NativeInput.pp_print_term inv
 
   let run in_sys param _ results =
     let top = (Analysis.info_of_param param).Analysis.top in
 
     last_result in_sys results top
-    |> Res.chain (fun { Analysis.sys } -> 
+    |> Res.chain (fun { Analysis.sys } ->
 
       try (
         let _, invs_min =
           CertifChecker.minimize_invariants sys None None
         in
-        match Flags.cache_invs () with 
-          | false -> Ok ()
-          | true ->
-            let dirname = Flags.output_dir () in
+        match Flags.cache_invs () with
+        | false -> Ok ()
+        | true ->
+          mk_dir (Flags.output_dir ());
 
-            mk_dir dirname;
+          (* One file per node. *)
+          let file =
+            NativeInput.cache_file_of_scope (TSys.scope_of_trans_sys sys) in
+          let oc = open_out file in
+          let fmt = Format.formatter_of_out_channel oc in
+          Format.pp_set_margin fmt 1_000_000 ;
 
-            let oc = open_out (dirname ^ "/invariants.txt") in
-            let fmt = Format.formatter_of_out_channel oc in
-            Format.pp_set_margin fmt 1_000_000 ;   (* disable line wrapping *)
-
-            Format.fprintf fmt "%s@." (NativeInput.structural_form sys) ;
-            
-            let sv_key sv = Format.asprintf "%a" StateVar.pp_print_state_var sv in
-
-            let pp_inv fmt inv =
-              let svs = Term.state_vars_of_term inv |> StateVar.StateVarSet.elements in
-              Format.fprintf fmt "(inv (%a) %a)"
-                (Format.pp_print_list ~pp_sep:Format.pp_print_space (fun fmt sv ->
-                   Format.fprintf fmt "(%s %a)" (sv_key sv)
-                     Type.pp_print_type (StateVar.type_of_state_var sv)))
-                svs
-                NativeInput.pp_print_term inv
-            in
-            List.iter
-              (fun inv ->
-                Format.fprintf fmt "%a@." pp_inv inv
-              )
-            invs_min ;
-            close_out oc;
-            
-            Ok ()
+          Format.fprintf fmt "%s@." (NativeInput.structural_form sys) ;
+          List.iter (fun inv -> Format.fprintf fmt "%a@." pp_inv inv) invs_min ;
+          close_out oc ;
+          Ok ()
       ) with
-      | CertifChecker.CouldNotProve err -> error(
+      | CertifChecker.CouldNotProve err -> error (
         fun fmt ->
           Format.fprintf fmt
             "Could not minimize invariants:@ %a" (fun fmt () -> err fmt) ()
       )
       | e -> error (
         fun fmt -> Format.fprintf fmt
-          "Could not minimize invariants:@ %s"
-          (Printexc.to_string e)
+          "Could not minimize invariants:@ %s" (Printexc.to_string e)
       )
     )
 end
-
 (** List of post-analysis modules. *)
 let post_analysis = [
   (module RunInvPrint: PostAnalysis) ;

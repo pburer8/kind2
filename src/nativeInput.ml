@@ -829,6 +829,19 @@ let structural_form sys =
     pp_print_term (TransSys.init_of_bound None sys TransSys.init_base)
     pp_print_term (TransSys.trans_of_bound None sys TransSys.trans_base)
 
+let sanitize_for_filename s =
+  String.map
+    (function
+      | ('a'..'z' | 'A'..'Z' | '0'..'9' | '_' | '-' | '.') as c -> c
+      | _ -> '_')
+    s
+
+let cache_file_prefix () = Flags.output_dir () ^ "/invariants"
+
+let cache_file_of_scope scope =
+  cache_file_prefix () ^ "." ^ sanitize_for_filename (String.concat "." scope)
+  ^ ".txt"
+
 (* 
    Local Variables:
    compile-command: "make -C .. -k"
