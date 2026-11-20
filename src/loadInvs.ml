@@ -96,6 +96,18 @@ let rec match_sexp ~old_vars ~new_vars st o n =
       (Some st) os ns
   | _ -> None
 
+let rec restore_calls table = function
+  | HS.Atom a as s -> (
+    match SM.find_opt (str a) table with
+    | Some full -> HS.Atom (HString.mk_hstring full)
+    | None -> s)
+  | HS.List l -> HS.List (List.map (restore_calls table) l)
+
+let rec call_atoms acc = function
+  | HS.Atom a ->
+    if NativeInput.is_call_symbol (str a) then str a :: acc else acc
+  | HS.List l -> List.fold_left call_atoms acc l
+
 (* One simultaneous pass, so a swap x<->y is handled correctly. *)
 let rec rename sigma = function
   | HS.Atom a as s -> (
@@ -418,6 +430,14 @@ let classify_cache sys sexps =
 let install_cached sys sexps plan =
   let inv_entries = List.filter (fun e -> not (head_is "system" e)) sexps in
   let cur = current_signature sys in
+  (* Canonical call symbol -> this analysis's symbol. Names with more than one
+   candidate are left out, so invariants mentioning them are dropped. *)
+  let call_table =
+    List.fold_left
+      (fun m (c, l) -> match l with [f] -> SM.add c f m | _ -> m)
+      SM.empty (NativeInput.call_symbols sys)
+  in
+
   let sigma =
     match plan with
     | Exact (s, node) ->
@@ -468,8 +488,12 @@ let install_cached sys sexps plan =
        | HS.List [HS.Atom tag; HS.List sigs; term] when str tag = "inv" -> (
          match check_signature cur sigs with
          | Keep -> (
-           try kept := NativeInput.term_of_sexpr term :: !kept
-           with e -> drop "cannot parse (%s)" (Printexc.to_string e))
+            match List.filter (fun c -> not (SM.mem c call_table)) (call_atoms [] term) with
+            | missing :: _ ->
+              drop "calls %s, which has no unique symbol in this system" missing
+            | [] -> (
+              try kept := NativeInput.term_of_sexpr (restore_calls call_table term) :: !kept
+              with e -> drop "cannot parse (%s)" (Printexc.to_string e)))
          | Missing v -> drop "%s no longer exists" v
          | Retyped v -> drop "%s changed type" v)
        | _ -> drop "old-format or malformed entry")

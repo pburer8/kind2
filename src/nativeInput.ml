@@ -822,12 +822,74 @@ let dump_native sys =
   in
   dump_native_to sys filename
 
-let structural_form sys =
+let has_prefix_str p s =
+  String.length s >= String.length p && String.sub s 0 (String.length p) = p
+
+let is_call_symbol tok =
+  has_prefix_str (Ids.init_uf_string ^ "_") tok
+  || has_prefix_str (Ids.trans_uf_string ^ "_") tok
+
+let is_digits s =
+  s <> ""
+  && (let ok = ref true in
+      String.iter (function '0'..'9' -> () | _ -> ok := false) s ;
+      !ok)
+
+(* "__node_init_<node>_<id>" -> Some "__node_init_<node>". Tokens that already
+   lack an ID, or are not call symbols, give None. *)
+let strip_call_id tok =
+  if not (is_call_symbol tok) then None
+  else
+    match String.rindex_opt tok '_' with
+    | Some i when i + 1 < String.length tok ->
+      if is_digits (String.sub tok (i + 1) (String.length tok - i - 1))
+      then Some (String.sub tok 0 i) else None
+    | _ -> None
+
+let map_tokens f s =
+  let n = String.length s in
+  let delim c = c = ' ' || c = '\n' || c = '\t' || c = '\r' || c = '(' || c = ')' in
+  let b = Buffer.create n in
+  let i = ref 0 in
+  while !i < n do
+    if delim s.[!i] then (Buffer.add_char b s.[!i] ; incr i)
+    else begin
+      let j = ref !i in
+      while !j < n && not (delim s.[!j]) do incr j done ;
+      Buffer.add_string b (f (String.sub s !i (!j - !i))) ;
+      i := !j
+    end
+  done ;
+  Buffer.contents b
+
+let strip_call_ids s =
+  map_tokens (fun t -> match strip_call_id t with Some c -> c | None -> t) s
+
+(* canonical name -> distinct full names occurring in [raw] *)
+let call_symbols_of_text raw =
+  let tbl = Hashtbl.create 8 in
+  ignore
+    (map_tokens
+       (fun t ->
+          ( match strip_call_id t with
+            | Some c ->
+              let l = try Hashtbl.find tbl c with Not_found -> [] in
+              if not (List.mem t l) then Hashtbl.replace tbl c (l @ [t])
+            | None -> () ) ;
+          t)
+       raw) ;
+  Hashtbl.fold (fun c l acc -> (c, l) :: acc) tbl [] |> List.sort compare
+let structural_form_raw sys =
   Format.asprintf
     "@[<v 1>(system@,(vars (%a))@,(init %a)@,(trans %a))@]"
     (pp_print_list (pp_print_state_var sys) "@ ") (TransSys.state_vars sys)
     pp_print_term (TransSys.init_of_bound None sys TransSys.init_base)
     pp_print_term (TransSys.trans_of_bound None sys TransSys.trans_base)
+
+let structural_form sys = strip_call_ids (structural_form_raw sys)
+
+(* Canonical call symbol -> the full symbol(s) this system uses. *)
+let call_symbols sys = call_symbols_of_text (structural_form_raw sys)
 
 let sanitize_for_filename s =
   String.map

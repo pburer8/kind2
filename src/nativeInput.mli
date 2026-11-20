@@ -54,6 +54,12 @@ val cache_file_prefix : unit -> string
 
 val cache_file_of_scope : string list -> string
 
+val strip_call_ids : string -> string
+
+val is_call_symbol : string -> bool
+
+val call_symbols : TransSys.t -> (string * string list) list
+
 (* 
    Local Variables:
    compile-command: "make -C .. -k"

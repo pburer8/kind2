@@ -964,7 +964,12 @@ module RunCacheInvs : PostAnalysis = struct
           Format.pp_set_margin fmt 1_000_000 ;
 
           Format.fprintf fmt "%s@." (NativeInput.structural_form sys) ;
-          List.iter (fun inv -> Format.fprintf fmt "%a@." pp_inv inv) invs_min ;
+          List.iter
+            (fun inv ->
+              Format.fprintf fmt "%s@."
+                (NativeInput.strip_call_ids (Format.asprintf "%a" pp_inv inv)))
+            invs_min ;
+          
           close_out oc ;
           Ok ()
       ) with
