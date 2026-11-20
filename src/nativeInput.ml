@@ -785,7 +785,7 @@ let pp_structural_parts ppf sys =
     pp_print_term (TransSys.trans_of_bound None sys TransSys.trans_base)
 
 (* The system, followed by one (callee ...) entry per distinct subsystem. *)
-let structural_form sys =
+let structural_form_raw sys =
   (* all_systems lists subsystems first and sys itself last, and skips
      duplicates, so drop sys by scope to keep only the callees. *)
   let callees =
@@ -879,12 +879,6 @@ let call_symbols_of_text raw =
           t)
        raw) ;
   Hashtbl.fold (fun c l acc -> (c, l) :: acc) tbl [] |> List.sort compare
-let structural_form_raw sys =
-  Format.asprintf
-    "@[<v 1>(system@,(vars (%a))@,(init %a)@,(trans %a))@]"
-    (pp_print_list (pp_print_state_var sys) "@ ") (TransSys.state_vars sys)
-    pp_print_term (TransSys.init_of_bound None sys TransSys.init_base)
-    pp_print_term (TransSys.trans_of_bound None sys TransSys.trans_base)
 
 let structural_form sys = strip_call_ids (structural_form_raw sys)
 
