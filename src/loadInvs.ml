@@ -74,20 +74,37 @@ let check_signature cur sigs =
   in
   go sigs
 
-(* Walk the stored system and the new one in lockstep, building old->new
-   and its inverse. [None] means the two are not related by a renaming. *)
+type mapping = {
+  v_fwd : string SM.t ; v_bwd : string SM.t ;  (* variables, old <-> new *)
+  n_fwd : string SM.t ; n_bwd : string SM.t ;  (* callee node names, old <-> new *)
+}
+
+let empty_mapping =
+  { v_fwd = SM.empty ; v_bwd = SM.empty ; n_fwd = SM.empty ; n_bwd = SM.empty }
+
 let rec match_sexp ~old_vars ~new_vars st o n =
   match o, n with
   | HS.Atom a, HS.Atom b -> (
     let a = str a and b = str b in
-    let sigma, inv = st in
     match SS.mem a old_vars, SS.mem b new_vars with
     | true, true -> (
-      match SM.find_opt a sigma, SM.find_opt b inv with
-      | None, None -> Some (SM.add a b sigma, SM.add b a inv)
+      match SM.find_opt a st.v_fwd, SM.find_opt b st.v_bwd with
+      | None, None ->
+        Some { st with v_fwd = SM.add a b st.v_fwd ; v_bwd = SM.add b a st.v_bwd }
       | Some b', Some a' when b' = b && a' = a -> Some st
       | _ -> None)
-    | false, false when a = b -> Some st
+    | false, false -> (
+      match NativeInput.split_call_symbol a, NativeInput.split_call_symbol b with
+      | Some (pa, na), Some (pb, nb) when pa = pb -> (
+        (* Call symbols: one consistent, one-to-one mapping on node names,
+           even when the names are identical, so injectivity is enforced. *)
+        match SM.find_opt na st.n_fwd, SM.find_opt nb st.n_bwd with
+        | None, None ->
+          Some { st with n_fwd = SM.add na nb st.n_fwd ; n_bwd = SM.add nb na st.n_bwd }
+        | Some nb', Some na' when nb' = nb && na' = na -> Some st
+        | _ -> None)
+      | None, None when a = b -> Some st
+      | _ -> None)
     | _ -> None)
   | HS.List os, HS.List ns when List.length os = List.length ns ->
     List.fold_left2
@@ -108,13 +125,18 @@ let rec call_atoms acc = function
     if NativeInput.is_call_symbol (str a) then str a :: acc else acc
   | HS.List l -> List.fold_left call_atoms acc l
 
-(* One simultaneous pass, so a swap x<->y is handled correctly. *)
-let rec rename sigma = function
+let rec rename_all sigma nmap = function
   | HS.Atom a as s -> (
     match SM.find_opt (str a) sigma with
     | Some b -> HS.Atom (HString.mk_hstring b)
-    | None -> s)
-  | HS.List l -> HS.List (List.map (rename sigma) l)
+    | None -> (
+      match NativeInput.split_call_symbol (str a) with
+      | Some (p, n) -> (
+        match SM.find_opt n nmap with
+        | Some n' -> HS.Atom (HString.mk_hstring (p ^ "_" ^ n'))
+        | None -> s)
+      | None -> s))
+  | HS.List l -> HS.List (List.map (rename_all sigma nmap) l)
 
 let head_is name = function
   | HS.List (HS.Atom h :: _) -> str h = name
@@ -407,24 +429,93 @@ let sibling_cache_files ~except =
     |> List.sort compare
     |> List.map (Filename.concat dir)
 
+let label i = function
+  | HS.Atom a ->
+      Printf.sprintf "atom[%d](%s)" i (str a)
+  | HS.List (HS.Atom h :: _) ->
+      Printf.sprintf "list[%d](%s)" i (str h)
+  | HS.List [] ->
+      Printf.sprintf "list[%d](empty)" i
+  | HS.List _ ->
+      Printf.sprintf "list[%d]" i
+
+let head_name = function
+  | HS.Atom a -> str a
+  | HS.List (HS.Atom h :: _) -> str h
+  | HS.List _ -> "<list>"
+
+let rec explain ~old_vars ~new_vars path st o n =
+  let here msg = Error (String.concat " > " (List.rev path), msg) in
+  match o, n with
+  | HS.Atom a, HS.Atom b -> (
+    let a = str a and b = str b in
+    match SS.mem a old_vars, SS.mem b new_vars with
+    | true, true -> (
+      match SM.find_opt a st.v_fwd, SM.find_opt b st.v_bwd with
+      | None, None ->
+        Ok { st with v_fwd = SM.add a b st.v_fwd ; v_bwd = SM.add b a st.v_bwd }
+      | Some b', Some a' when b' = b && a' = a -> Ok st
+      | Some b', _ when b' <> b ->
+        here (Printf.sprintf "%s was already matched to %s, but here it is %s" a b' b)
+      | _ -> here (Printf.sprintf "%s is already the image of another variable" b))
+    | false, false -> (
+      match NativeInput.split_call_symbol a, NativeInput.split_call_symbol b with
+      | Some (pa, na), Some (pb, nb) ->
+        if pa <> pb then here (Printf.sprintf "call symbol %s vs %s (init vs trans)" a b)
+        else (
+          match SM.find_opt na st.n_fwd, SM.find_opt nb st.n_bwd with
+          | None, None ->
+            Ok { st with n_fwd = SM.add na nb st.n_fwd ; n_bwd = SM.add nb na st.n_bwd }
+          | Some nb', Some na' when nb' = nb && na' = na -> Ok st
+          | Some nb', _ when nb' <> nb ->
+            here (Printf.sprintf "callee %s was already matched to %s, but here it is %s" na nb' nb)
+          | _ -> here (Printf.sprintf "callee %s is already the image of another callee" nb))
+      | None, None ->
+        if a = b then Ok st else here (Printf.sprintf "symbol %s vs %s" a b)
+      | _ -> here (Printf.sprintf "symbol %s vs %s (call symbol on one side only)" a b))
+    | true, false -> here (Printf.sprintf "variable %s vs non-variable %s" a b)
+    | false, true -> here (Printf.sprintf "non-variable %s vs variable %s" a b))
+  | HS.List os, HS.List ns ->
+    let rec go i st os ns =
+      match os, ns with
+      | [], [] -> Ok st
+      | o :: os', n :: ns' -> (
+        match explain ~old_vars ~new_vars (label i o :: path) st o n with
+        | Ok st -> go (i + 1) st os' ns'
+        | Error _ as e -> e)
+      | o :: _, [] ->
+        here (Printf.sprintf "old has %d more element(s) from index %d, starting with %s"
+                (List.length os) i (head_name o))
+      | [], n :: _ ->
+        here (Printf.sprintf "new has %d more element(s) from index %d, starting with %s"
+                (List.length ns) i (head_name n))
+    in
+    go 0 st os ns
+  | HS.Atom a, HS.List _ -> here (Printf.sprintf "atom %s vs a list" (str a))
+  | HS.List _, HS.Atom b -> here (Printf.sprintf "a list vs atom %s" (str b))
+
 type cache_match =
-  | Exact of string SM.t * node_change  (* same up to renaming *)
-  | Approx of full_diff                 (* differs; guess from declarations *)
-  | Unrelated                           (* no usable (system ...) entry *)
+  | Exact of mapping * node_change
+  | Approx of full_diff * string
+  | Unrelated(* no usable (system ...) entry *)
 
 let classify_cache sys sexps =
   match List.filter (head_is "system") sexps,
         parse_one (NativeInput.structural_form sys) with
   | [old_system], Some new_system -> (
     let old_decls = decls_of old_system and new_decls = decls_of new_system in
-    match
-      match_sexp
-        ~old_vars:(var_names_of_system old_system)
-        ~new_vars:(var_names_of_system new_system)
-        (SM.empty, SM.empty) old_system new_system
-    with
-    | Some (s, _) -> Exact (s, diff_nodes old_decls new_decls)
-    | None -> Approx (diff_system old_decls new_decls))
+    let old_vars = var_names_of_system old_system
+    and new_vars = var_names_of_system new_system in
+    match match_sexp ~old_vars ~new_vars empty_mapping old_system new_system with
+    | Some m -> Exact (m, diff_nodes old_decls new_decls)
+    | None ->
+      let reason =
+        match explain ~old_vars ~new_vars ["system"] empty_mapping
+                old_system new_system with
+        | Error (path, msg) -> path ^ ": " ^ msg
+        | Ok _ -> "no difference found"
+      in
+      Approx (diff_system old_decls new_decls, reason))
   | _ -> Unrelated
 
 let install_cached sys sexps plan =
@@ -438,43 +529,34 @@ let install_cached sys sexps plan =
       SM.empty (NativeInput.call_symbols sys)
   in
 
-  let sigma =
-    match plan with
-    | Exact (s, node) ->
-      if not (SM.exists (fun a b -> a <> b) s) then
-        KEvent.log L_note "Cache: system unchanged."
-      else (
-        ( match node with
-          | Node_renamed (o, n) ->
-            KEvent.log L_note "Cache: node renamed %s -> %s." o n
-          | Node_same | Node_unknown -> () ) ;
-        SM.iter
-          (fun a b ->
-             if a <> b && not (is_node_only_rename a b) then
-               KEvent.log L_note "Cache: renamed %s -> %s" a b)
-          s
-      ) ;
-      Some s
-    | Approx fd ->
-      KEvent.log L_note
-        "Cache: system differs by more than variable names (a callee or the \
-         model's logic may have changed)." ;
-      List.iter (fun (n, o, t) ->
-          KEvent.log L_note "Cache: %s changed type %s -> %s" n o t)
-        fd.vars.retyped ;
-      List.iter (fun (n, o, f) ->
-          KEvent.log L_note "Cache: %s changed flags '%s' -> '%s'" n o f)
-        fd.vars.reflagged ;
-      List.iter (fun (a, b) ->
-          KEvent.log L_note "Cache: guessed rename %s -> %s" a b)
-        fd.vars.renamed ;
-      Some fd.sigma
-    | Unrelated ->
-      KEvent.log L_note
-        "Cache: no system recorded; keeping invariants whose variables \
-         still exist." ;
-      None
-  in
+  let sigma, nmap =
+  match plan with
+  | Exact (m, node) ->
+    if not (SM.exists (fun a b -> a <> b) m.v_fwd
+            || SM.exists (fun a b -> a <> b) m.n_fwd) then
+      KEvent.log L_debug "Cache: system unchanged."
+    else (
+      ( match node with
+        | Node_renamed (o, n) ->
+          KEvent.log L_debug "Cache: node renamed %s -> %s." o n
+        | Node_same | Node_unknown -> () ) ;
+      SM.iter
+        (fun a b -> if a <> b then KEvent.log L_debug "Cache: callee node renamed %s -> %s" a b)
+        m.n_fwd ;
+      SM.iter
+        (fun a b ->
+           if a <> b && not (is_node_only_rename a b) then
+             KEvent.log L_debug "Cache: renamed %s -> %s" a b)
+        m.v_fwd
+    ) ;
+    (Some m.v_fwd, m.n_fwd)
+  | Approx (fd, reason) ->
+    (* ... logging as before ... *)
+    (Some fd.sigma, SM.empty)
+  | Unrelated ->
+    (* ... logging as before ... *)
+    (None, SM.empty)
+in
   let kept = ref [] and dropped = ref 0 in
   let drop fmt =
     incr dropped ;
@@ -483,7 +565,7 @@ let install_cached sys sexps plan =
   in
   List.iter
     (fun entry ->
-       let entry = match sigma with Some s -> rename s entry | None -> entry in
+       let entry = match sigma with Some s -> rename_all s nmap entry | None -> entry in
        match entry with
        | HS.List [HS.Atom tag; HS.List sigs; term] when str tag = "inv" -> (
          match check_signature cur sigs with
@@ -498,7 +580,7 @@ let install_cached sys sexps plan =
          | Retyped v -> drop "%s changed type" v)
        | _ -> drop "old-format or malformed entry")
     inv_entries ;
-  KEvent.log L_note "Cached invariants: %d loaded as candidates, %d dropped."
+  KEvent.log L_debug "Cached invariants: %d loaded as candidates, %d dropped."
     (List.length !kept) !dropped ;
   add_as_candidate (List.rev !kept) sys
 
@@ -508,20 +590,25 @@ let load_cached_invariants sys =
     match read_cache_file own with
     | Some sexps -> install_cached sys sexps (classify_cache sys sexps)
     | None ->
-      KEvent.log L_note "Cache: could not read %s." own ;
+      KEvent.log L_debug "Cache: could not read %s." own ;
       sys
   ) else
     (* No cache under this node's name. If the node was renamed, another
        node's file may match this one up to renaming. Accept only an exact
        match, so an unrelated node's cache is never borrowed on a guess. *)
     let rec try_siblings = function
-      | [] -> sys
+      | [] ->
+        KEvent.log L_debug
+          "Cache: nothing cached for node %s, and no other node's cache matches it \
+           up to renaming."
+          (String.concat "." (TSys.scope_of_trans_sys sys)) ;
+        sys
       | f :: rest -> (
         match read_cache_file f with
         | Some sexps -> (
           match classify_cache sys sexps with
           | Exact _ as plan ->
-            KEvent.log L_note
+            KEvent.log L_debug
               "Cache: no file for this node; using %s (matches up to renaming)." f ;
             install_cached sys sexps plan
           | Approx _ | Unrelated -> try_siblings rest)

@@ -56,6 +56,8 @@ val cache_file_of_scope : string list -> string
 
 val strip_call_ids : string -> string
 
+val split_call_symbol : string -> (string * string) option
+
 val is_call_symbol : string -> bool
 
 val call_symbols : TransSys.t -> (string * string list) list

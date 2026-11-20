@@ -865,6 +865,19 @@ let map_tokens f s =
 let strip_call_ids s =
   map_tokens (fun t -> match strip_call_id t with Some c -> c | None -> t) s
 
+(* "__node_init_<node>" / "__node_trans_<node>" (ID already stripped) ->
+   Some (prefix, node), where prefix is the generator's init or trans string. *)
+let split_call_symbol tok =
+  let try_prefix p =
+    let pu = p ^ "_" in
+    if has_prefix_str pu tok && String.length tok > String.length pu then
+      Some (p, String.sub tok (String.length pu) (String.length tok - String.length pu))
+    else None
+  in
+  match try_prefix Ids.init_uf_string with
+  | Some _ as r -> r
+  | None -> try_prefix Ids.trans_uf_string
+
 (* canonical name -> distinct full names occurring in [raw] *)
 let call_symbols_of_text raw =
   let tbl = Hashtbl.create 8 in
